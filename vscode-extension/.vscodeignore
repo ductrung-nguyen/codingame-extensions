@@ -1,0 +1,31 @@
+# Build outputs - KEEP out/ for distribution!
+# out/ is needed - contains compiled JavaScript
+node_modules/
+src/
+.vscode-test/
+
+# Development files
+.gitignore
+tsconfig.json
+.eslintrc.json
+*.map
+*.ts
+
+# Documentation
+.vscode/
+.editorconfig
+
+# Tests
+**/test/**
+**/*.test.*
+
+# Misc
+.DS_Store
+*.log
+npm-debug.log*
+.env
+.env.local
+
+# Keep these - include compiled code and dependencies
+!out/**/*.js
+!node_modules/ws/**
