@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "CodinGame Sync Bridge",
   "description": "Bridges CodinGame in-browser editor with the local VS Code environment.",
-  "version": "0.1.0",
+  "version": "0.1.5",
   "action": {
     "default_title": "CodinGame Sync Bridge",
     "default_popup": "popup.html"
@@ -15,17 +15,11 @@
     "tabs",
     "alarms"
   ],
-  "host_permissions": [
-    "https://www.codingame.com/*"
-  ],
+  "host_permissions": ["https://www.codingame.com/*"],
   "content_scripts": [
     {
-      "matches": [
-        "https://www.codingame.com/*"
-      ],
-      "js": [
-        "content-script.js"
-      ],
+      "matches": ["https://www.codingame.com/*"],
+      "js": ["content-script.js"],
       "run_at": "document_idle"
     }
   ],
@@ -40,10 +34,7 @@
     "128": "icons/icon-128.png"
   },
   "externally_connectable": {
-    "matches": [
-      "http://127.0.0.1:*/*",
-      "https://localhost:*/*"
-    ]
+    "matches": ["http://127.0.0.1:*/*", "https://localhost:*/*"]
   },
   "options_ui": {
     "page": "options.html",
@@ -51,12 +42,8 @@
   },
   "web_accessible_resources": [
     {
-      "resources": [
-        "page-script.js"
-      ],
-      "matches": [
-        "https://www.codingame.com/*"
-      ]
+      "resources": ["page-script.js"],
+      "matches": ["https://www.codingame.com/*"]
     }
   ]
 }
