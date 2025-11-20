@@ -29,6 +29,7 @@
   let captureButton = null;
   let capturePanel = null;
   let pauseResumeButton = null;
+  let stopButton = null;
   let categoryInput = null;
   let captureStatusText = null;
   let availableBattles = []; // Store battles from findLastBattlesByAgentId
@@ -37,6 +38,7 @@
   let monitoringInterval = null;
   let capturePaused = false;
   let captureInProgress = false;
+  let captureShouldStop = false;
   let captureCategory = "";
   let currentTeamName = "";
   let panelCaptureButton = null;
@@ -1628,9 +1630,40 @@
       );
     };
 
+    // Stop button
+    stopButton = document.createElement("button");
+    stopButton.textContent = "⏹️";
+    stopButton.style.cssText = `
+      padding: 10px 16px;
+      background: #fee2e2;
+      color: #dc2626;
+      border: none;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      display: none;
+    `;
+
+    stopButton.onmouseenter = () => {
+      stopButton.style.background = "#fecaca";
+    };
+
+    stopButton.onmouseleave = () => {
+      stopButton.style.background = "#fee2e2";
+    };
+
+    stopButton.onclick = () => {
+      captureShouldStop = true;
+      updateCaptureStatus("⏹️ Stopping...", "warning");
+      console.log("[CodinGame Content Script] User requested to stop capture");
+    };
+
     // Assemble panel
     buttonContainer.appendChild(captureButton);
     buttonContainer.appendChild(pauseResumeButton);
+    buttonContainer.appendChild(stopButton);
 
     capturePanel.appendChild(categoryLabel);
     capturePanel.appendChild(categoryInput);
@@ -1653,6 +1686,7 @@
         : "linear-gradient(135deg, #667eea 0%, #764ba2 100%)";
     }
 
+    // Show/hide pause and stop buttons based on capture state
     if (pauseResumeButton) {
       pauseResumeButton.style.display = inProgress ? "block" : "none";
       if (!inProgress) {
@@ -1660,6 +1694,9 @@
         pauseResumeButton.textContent = "⏸️";
         pauseResumeButton.style.background = "#f1f5f9";
       }
+    }
+    if (stopButton) {
+      stopButton.style.display = inProgress ? "block" : "none";
     }
 
     if (!inProgress && captureStatusText) {
@@ -1688,8 +1725,9 @@
     );
     updateBatchCaptureButton("⏳ Fetching battles...", true);
 
-    // Reset pause state
+    // Reset pause and stop states
     capturePaused = false;
+    captureShouldStop = false;
 
     // Team name should already be set by the __cgBattleListCaptured event handler
     // which receives the correct team name from the API
@@ -1788,32 +1826,48 @@
       }
 
       // Filter out battles that have already been captured
-      const newBattles = battles.filter(
-        (b) => !capturedBattleIds.has(b.gameId),
-      );
+      let newBattles = battles.filter((b) => !capturedBattleIds.has(b.gameId));
 
       if (newBattles.length === 0) {
         console.log(
           `[CodinGame Content Script] All ${battles.length} battles already captured`,
         );
-        showStatus(
-          `All battles already captured (${capturedBattleIds.size} total)`,
-          "success",
-        );
-        updateBatchCaptureButton(
-          continuousMonitoring ? "🔄 Monitoring..." : "📊 Capture",
-          false,
-        );
-        updateCaptureStatus(
-          `All ${battles.length} battles captured`,
-          "success",
+
+        // Ask user if they want to re-capture
+        const reCapture = confirm(
+          `All ${battles.length} battles have already been captured.\n\n` +
+            `Do you want to capture them again?`,
         );
 
-        // If we were monitoring, keep the monitoring button state
-        if (continuousMonitoring) {
-          updateBatchCaptureButton("🔄 Monitoring... (click to stop)", false);
+        if (reCapture) {
+          // Clear the captured IDs for this team's battles to allow re-capture
+          battles.forEach((b) => capturedBattleIds.delete(b.gameId));
+          console.log(
+            `[CodinGame Content Script] User chose to re-capture ${battles.length} battles`,
+          );
+          showStatus(`Re-capturing ${battles.length} battles...`, "pending");
+          // Re-evaluate newBattles after clearing the cache
+          newBattles = battles.filter((b) => !capturedBattleIds.has(b.gameId));
+        } else {
+          showStatus(
+            `All battles already captured (${capturedBattleIds.size} total)`,
+            "success",
+          );
+          updateBatchCaptureButton(
+            continuousMonitoring ? "🔄 Monitoring..." : "📊 Capture",
+            false,
+          );
+          updateCaptureStatus(
+            `All ${battles.length} battles captured`,
+            "success",
+          );
+
+          // If we were monitoring, keep the monitoring button state
+          if (continuousMonitoring) {
+            updateBatchCaptureButton("🔄 Monitoring... (click to stop)", false);
+          }
+          return;
         }
-        return;
       }
 
       console.log(
@@ -1833,6 +1887,18 @@
       let failCount = 0;
 
       for (let i = 0; i < newBattles.length; i++) {
+        // Check if user requested to stop
+        if (captureShouldStop) {
+          console.log(
+            `[CodinGame Content Script] Capture stopped by user at ${i}/${newBattles.length}`,
+          );
+          updateCaptureStatus(
+            `⏹️ Stopped (captured ${successCount}/${newBattles.length})`,
+            "warning",
+          );
+          break;
+        }
+
         const battle = newBattles[i];
         const progress = `${i + 1}/${newBattles.length}`;
         updateBatchCaptureButton(`⏳ ${progress}`, true);
@@ -1841,8 +1907,13 @@
 
         try {
           // Wait if paused
-          while (capturePaused) {
+          while (capturePaused && !captureShouldStop) {
             await new Promise((resolve) => setTimeout(resolve, 100));
+          }
+
+          // Check again after waiting in case stop was requested
+          if (captureShouldStop) {
+            break;
           }
 
           // Fetch and send battle to background script with category
@@ -1872,10 +1943,15 @@
         }
       }
 
-      const message =
-        `✓ Captured ${successCount}/${newBattles.length} new battles (${capturedBattleIds.size} total)` +
-        (failCount > 0 ? ` (${failCount} failed)` : "");
-      showStatus(message, successCount > 0 ? "success" : "error");
+      const message = captureShouldStop
+        ? `⏹️ Stopped: ${successCount}/${newBattles.length} battles captured` +
+          (failCount > 0 ? ` (${failCount} failed)` : "")
+        : `✓ Captured ${successCount}/${newBattles.length} new battles (${capturedBattleIds.size} total)` +
+          (failCount > 0 ? ` (${failCount} failed)` : "");
+      showStatus(
+        message,
+        captureShouldStop ? "warning" : successCount > 0 ? "success" : "error",
+      );
 
       if (startMonitoring && !continuousMonitoring) {
         startContinuousMonitoring();
@@ -1889,7 +1965,9 @@
       }
 
       console.log(
-        `[CodinGame Content Script] Batch capture complete: ${successCount} success, ${failCount} failed, ${capturedBattleIds.size} total captured`,
+        captureShouldStop
+          ? `[CodinGame Content Script] Batch capture stopped: ${successCount} success, ${failCount} failed, ${capturedBattleIds.size} total captured`
+          : `[CodinGame Content Script] Batch capture complete: ${successCount} success, ${failCount} failed, ${capturedBattleIds.size} total captured`,
       );
     } catch (error) {
       console.error("[CodinGame Content Script] Batch capture error:", error);
@@ -1902,6 +1980,8 @@
         false,
       );
       captureInProgress = false;
+      captureShouldStop = false;
+    } finally {
     }
   }
 
@@ -2811,6 +2891,7 @@
       capturePanel = null;
       captureButton = null;
       pauseResumeButton = null;
+      stopButton = null;
       categoryInput = null;
       captureStatusText = null;
       if (lastBattlesPanelObserver) {
