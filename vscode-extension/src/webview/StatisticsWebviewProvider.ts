@@ -16,18 +16,19 @@
  * Task 2.5: Statistics Webview Interactions
  */
 
-import * as vscode from 'vscode';
-import * as path from 'path';
-import { MatchStorageService } from '../services/MatchStorageService';
-import { MatchRecord, MatchStorageEvent } from '../models/MatchRecord';
+import * as vscode from "vscode";
+import * as path from "path";
+import { MatchStorageService } from "../services/MatchStorageService";
+import { MatchRecord, MatchStorageEvent } from "../models/MatchRecord";
 
 /**
  * Filter state for match data
  */
 interface FilterState {
-  result?: 'WIN' | 'LOSE' | 'DRAW' | null;
+  result?: "WIN" | "LOSE" | "DRAW" | null;
   order?: 0 | 1 | null;
   arena?: boolean | null;
+  category?: string | null;
   opponent?: string | null;
   league?: string | null;
   dateRange?: {
@@ -50,6 +51,7 @@ interface StatisticsSummary {
   arenaMatches: number;
   soloMatches: number;
   avgDuration: number;
+  categories?: { name: string; count: number }[];
 }
 
 /**
@@ -74,6 +76,7 @@ interface StatisticsData {
   filterCount: number;
   totalCount: number;
   appliedFilters: FilterState;
+  availableCategories: string[];
 }
 
 /**
@@ -90,28 +93,36 @@ interface MatchDetailData extends MatchRecord {
  * Messages from webview to extension
  */
 type WebviewMessage =
-  | { type: 'webviewReady' }
-  | { type: 'requestData'; filters?: FilterState }
-  | { type: 'openReplay'; matchId: string }
-  | { type: 'requestMatchDetails'; matchId: string }
-  | { type: 'revealFile'; matchId: string }
-  | { type: 'copySummary'; summary: string }
-  | { type: 'clearFilters' }
-  | { type: 'exportCSV'; filters?: FilterState };
+  | { type: "webviewReady" }
+  | { type: "requestData"; filters?: FilterState }
+  | { type: "openReplay"; matchId: string }
+  | { type: "requestMatchDetails"; matchId: string }
+  | { type: "revealFile"; matchId: string }
+  | { type: "copySummary"; summary: string }
+  | { type: "clearFilters" }
+  | { type: "exportCSV"; filters?: FilterState };
 
 /**
  * Messages from extension to webview
  */
 type ExtensionMessage =
-  | { type: 'initializeFilters'; filters: FilterState }
-  | { type: 'dataResponse'; data: StatisticsData; filters: FilterState; timestamp: string; computeTime: number }
-  | { type: 'matchAdded'; match: MatchRecord; timestamp: string }
-  | { type: 'matchDetails'; details: MatchDetailData }
-  | { type: 'matchDetailsError'; matchId: string; error: string }
-  | { type: 'replayOpened'; matchId: string; success: boolean; error?: string };
+  | { type: "initializeFilters"; filters: FilterState }
+  | {
+      type: "dataResponse";
+      data: StatisticsData;
+      filters: FilterState;
+      timestamp: string;
+      computeTime: number;
+    }
+  | { type: "matchAdded"; match: MatchRecord; timestamp: string }
+  | { type: "matchDetails"; details: MatchDetailData }
+  | { type: "matchDetailsError"; matchId: string; error: string }
+  | { type: "replayOpened"; matchId: string; success: boolean; error?: string };
 
-export class StatisticsWebviewProvider implements vscode.WebviewViewProvider, vscode.Disposable {
-  private static readonly FILTER_STATE_KEY = 'codingame.statistics.filters';
+export class StatisticsWebviewProvider
+  implements vscode.WebviewViewProvider, vscode.Disposable
+{
+  private static readonly FILTER_STATE_KEY = "codingame.statistics.filters";
   private static readonly MAX_LOG_SIZE = 10240; // 10KB
 
   private view?: vscode.WebviewView;
@@ -122,7 +133,7 @@ export class StatisticsWebviewProvider implements vscode.WebviewViewProvider, vs
   constructor(
     private context: vscode.ExtensionContext,
     private matchStorageService: MatchStorageService,
-    private outputChannel: vscode.OutputChannel
+    private outputChannel: vscode.OutputChannel,
   ) {
     this.currentFilters = this.loadPersistedFilters();
 
@@ -130,10 +141,10 @@ export class StatisticsWebviewProvider implements vscode.WebviewViewProvider, vs
     this.disposables.push(
       matchStorageService.onMatchStored((event) => {
         this.handleMatchStored(event);
-      })
+      }),
     );
 
-    this.log('[WEBVIEW] Statistics provider initialized');
+    this.log("[WEBVIEW] Statistics provider initialized");
   }
 
   /**
@@ -143,15 +154,15 @@ export class StatisticsWebviewProvider implements vscode.WebviewViewProvider, vs
   resolveWebviewView(
     webviewView: vscode.WebviewView,
     _context: vscode.WebviewViewResolveContext,
-    _token: vscode.CancellationToken
+    _token: vscode.CancellationToken,
   ): void | Thenable<void> {
     this.view = webviewView;
 
     webviewView.webview.options = {
       enableScripts: true,
       localResourceRoots: [
-        vscode.Uri.joinPath(this.context.extensionUri, 'media')
-      ]
+        vscode.Uri.joinPath(this.context.extensionUri, "media"),
+      ],
     };
 
     webviewView.webview.html = this.getHtmlContent(webviewView.webview);
@@ -161,11 +172,11 @@ export class StatisticsWebviewProvider implements vscode.WebviewViewProvider, vs
       webviewView.webview.onDidReceiveMessage(
         async (message: WebviewMessage) => {
           await this.handleWebviewMessage(message);
-        }
-      )
+        },
+      ),
     );
 
-    this.log('[WEBVIEW] Webview resolved');
+    this.log("[WEBVIEW] Webview resolved");
   }
 
   /**
@@ -174,35 +185,35 @@ export class StatisticsWebviewProvider implements vscode.WebviewViewProvider, vs
   private async handleWebviewMessage(message: WebviewMessage): Promise<void> {
     try {
       switch (message.type) {
-        case 'webviewReady':
+        case "webviewReady":
           await this.handleWebviewReady();
           break;
 
-        case 'requestData':
+        case "requestData":
           await this.handleRequestData(message.filters);
           break;
 
-        case 'openReplay':
+        case "openReplay":
           await this.handleOpenReplay(message.matchId);
           break;
 
-        case 'requestMatchDetails':
+        case "requestMatchDetails":
           await this.handleMatchDetails(message.matchId);
           break;
 
-        case 'revealFile':
+        case "revealFile":
           await this.handleRevealFile(message.matchId);
           break;
 
-        case 'copySummary':
+        case "copySummary":
           await this.handleCopySummary(message.summary);
           break;
 
-        case 'clearFilters':
+        case "clearFilters":
           await this.handleClearFilters();
           break;
 
-        case 'exportCSV':
+        case "exportCSV":
           await this.handleExportCSV(message.filters);
           break;
 
@@ -210,7 +221,8 @@ export class StatisticsWebviewProvider implements vscode.WebviewViewProvider, vs
           this.log(`[WEBVIEW] Unknown message type: ${(message as any).type}`);
       }
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
       this.log(`[WEBVIEW] Error handling message: ${errorMessage}`);
       vscode.window.showErrorMessage(`CodinGame Statistics: ${errorMessage}`);
     }
@@ -220,11 +232,11 @@ export class StatisticsWebviewProvider implements vscode.WebviewViewProvider, vs
    * Handle webview ready signal
    */
   private async handleWebviewReady(): Promise<void> {
-    this.log('[WEBVIEW] Webview ready, sending initial filters');
+    this.log("[WEBVIEW] Webview ready, sending initial filters");
 
     this.postMessage({
-      type: 'initializeFilters',
-      filters: this.currentFilters
+      type: "initializeFilters",
+      filters: this.currentFilters,
     });
   }
 
@@ -244,15 +256,17 @@ export class StatisticsWebviewProvider implements vscode.WebviewViewProvider, vs
     const data = await this.computeStatistics(this.currentFilters);
     const computeTime = Date.now() - startTime;
 
-    this.log(`[WEBVIEW] Data computed in ${computeTime}ms (${data.matches.length} matches)`);
+    this.log(
+      `[WEBVIEW] Data computed in ${computeTime}ms (${data.matches.length} matches)`,
+    );
 
     // Send response
     this.postMessage({
-      type: 'dataResponse',
+      type: "dataResponse",
       data: data,
       filters: this.currentFilters,
       timestamp: new Date().toISOString(),
-      computeTime: computeTime
+      computeTime: computeTime,
     });
   }
 
@@ -270,33 +284,36 @@ export class StatisticsWebviewProvider implements vscode.WebviewViewProvider, vs
         this.log(`[WEBVIEW] Opened replay: ${replayUrl}`);
 
         this.postMessage({
-          type: 'replayOpened',
+          type: "replayOpened",
           matchId: matchId,
-          success: true
+          success: true,
         });
       } else {
-        throw new Error('Failed to open external browser');
+        throw new Error("Failed to open external browser");
       }
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
       this.log(`[WEBVIEW] Error opening replay: ${errorMessage}`);
 
       // Offer to copy URL to clipboard
       const action = await vscode.window.showErrorMessage(
         `Failed to open replay for match ${matchId}`,
-        'Copy URL'
+        "Copy URL",
       );
 
-      if (action === 'Copy URL') {
-        await vscode.env.clipboard.writeText(`https://www.codingame.com/replay/${matchId}`);
-        vscode.window.showInformationMessage('Replay URL copied to clipboard');
+      if (action === "Copy URL") {
+        await vscode.env.clipboard.writeText(
+          `https://www.codingame.com/replay/${matchId}`,
+        );
+        vscode.window.showInformationMessage("Replay URL copied to clipboard");
       }
 
       this.postMessage({
-        type: 'replayOpened',
+        type: "replayOpened",
         matchId: matchId,
         success: false,
-        error: errorMessage
+        error: errorMessage,
       });
     }
   }
@@ -315,38 +332,43 @@ export class StatisticsWebviewProvider implements vscode.WebviewViewProvider, vs
       // Read match file for full payload
       const filePath = path.join(
         this.matchStorageService.getDirectory(),
-        match.filename
+        match.filename,
       );
 
-      const fileContent = await vscode.workspace.fs.readFile(vscode.Uri.file(filePath));
-      const fullPayload = JSON.parse(Buffer.from(fileContent).toString('utf-8'));
+      const fileContent = await vscode.workspace.fs.readFile(
+        vscode.Uri.file(filePath),
+      );
+      const fullPayload = JSON.parse(
+        Buffer.from(fileContent).toString("utf-8"),
+      );
 
       // Extract stdout/stderr (limit to MAX_LOG_SIZE for UI)
-      const stdout = fullPayload.logs?.stdout || 'No output';
-      const stderr = fullPayload.logs?.stderr || 'No errors';
+      const stdout = fullPayload.logs?.stdout || "No output";
+      const stderr = fullPayload.logs?.stderr || "No errors";
 
       const details: MatchDetailData = {
         ...match,
         stdout: stdout.substring(0, StatisticsWebviewProvider.MAX_LOG_SIZE),
         stderr: stderr.substring(0, StatisticsWebviewProvider.MAX_LOG_SIZE),
         stdoutTruncated: stdout.length > StatisticsWebviewProvider.MAX_LOG_SIZE,
-        stderrTruncated: stderr.length > StatisticsWebviewProvider.MAX_LOG_SIZE
+        stderrTruncated: stderr.length > StatisticsWebviewProvider.MAX_LOG_SIZE,
       };
 
       this.log(`[WEBVIEW] Loaded details for match ${matchId}`);
 
       this.postMessage({
-        type: 'matchDetails',
-        details: details
+        type: "matchDetails",
+        details: details,
       });
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
       this.log(`[WEBVIEW] Error loading match details: ${errorMessage}`);
 
       this.postMessage({
-        type: 'matchDetailsError',
+        type: "matchDetailsError",
         matchId: matchId,
-        error: errorMessage
+        error: errorMessage,
       });
     }
   }
@@ -365,19 +387,22 @@ export class StatisticsWebviewProvider implements vscode.WebviewViewProvider, vs
 
       const filePath = path.join(
         this.matchStorageService.getDirectory(),
-        match.filename
+        match.filename,
       );
 
       const uri = vscode.Uri.file(filePath);
 
       // Reveal in Explorer
-      await vscode.commands.executeCommand('revealInExplorer', uri);
+      await vscode.commands.executeCommand("revealInExplorer", uri);
 
       this.log(`[WEBVIEW] Revealed file: ${filePath}`);
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
       this.log(`[WEBVIEW] Error revealing file: ${errorMessage}`);
-      vscode.window.showErrorMessage(`Failed to reveal match file: ${errorMessage}`);
+      vscode.window.showErrorMessage(
+        `Failed to reveal match file: ${errorMessage}`,
+      );
     }
   }
 
@@ -387,9 +412,10 @@ export class StatisticsWebviewProvider implements vscode.WebviewViewProvider, vs
   private async handleCopySummary(summary: string): Promise<void> {
     try {
       await vscode.env.clipboard.writeText(summary);
-      this.log('[WEBVIEW] Summary copied to clipboard');
+      this.log("[WEBVIEW] Summary copied to clipboard");
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
       this.log(`[WEBVIEW] Error copying summary: ${errorMessage}`);
       vscode.window.showErrorMessage(`Failed to copy summary: ${errorMessage}`);
     }
@@ -402,7 +428,7 @@ export class StatisticsWebviewProvider implements vscode.WebviewViewProvider, vs
     this.currentFilters = {};
     await this.persistFilters({});
     await this.handleRequestData({});
-    this.log('[WEBVIEW] Filters cleared');
+    this.log("[WEBVIEW] Filters cleared");
   }
 
   /**
@@ -413,38 +439,50 @@ export class StatisticsWebviewProvider implements vscode.WebviewViewProvider, vs
       const data = await this.computeStatistics(filters || this.currentFilters);
 
       // Generate CSV content
-      const headers = ['Match ID', 'Result', 'Order', 'Arena', 'Opponent', 'League', 'Duration (ms)', 'Timestamp'];
-      const rows = data.matches.map(m => [
+      const headers = [
+        "Match ID",
+        "Result",
+        "Order",
+        "Arena",
+        "Opponent",
+        "League",
+        "Duration (ms)",
+        "Timestamp",
+      ];
+      const rows = data.matches.map((m) => [
         m.matchId,
         m.result,
         m.order.toString(),
-        m.arena ? 'Arena' : 'Solo',
-        m.opponent || 'N/A',
-        m.league || 'N/A',
+        m.arena ? "Arena" : "Solo",
+        m.opponent || "N/A",
+        m.league || "N/A",
         (m.durationMs || 0).toString(),
-        m.timestamp
+        m.timestamp,
       ]);
 
       const csv = [
-        headers.join(','),
-        ...rows.map(row => row.map(cell => `"${cell}"`).join(','))
-      ].join('\n');
+        headers.join(","),
+        ...rows.map((row) => row.map((cell) => `"${cell}"`).join(",")),
+      ].join("\n");
 
       // Prompt for save location
       const uri = await vscode.window.showSaveDialog({
-        defaultUri: vscode.Uri.file('codingame-statistics.csv'),
+        defaultUri: vscode.Uri.file("codingame-statistics.csv"),
         filters: {
-          'CSV Files': ['csv']
-        }
+          "CSV Files": ["csv"],
+        },
       });
 
       if (uri) {
-        await vscode.workspace.fs.writeFile(uri, Buffer.from(csv, 'utf-8'));
-        vscode.window.showInformationMessage(`Exported ${data.matches.length} matches to ${uri.fsPath}`);
+        await vscode.workspace.fs.writeFile(uri, Buffer.from(csv, "utf-8"));
+        vscode.window.showInformationMessage(
+          `Exported ${data.matches.length} matches to ${uri.fsPath}`,
+        );
         this.log(`[WEBVIEW] Exported CSV: ${uri.fsPath}`);
       }
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
       this.log(`[WEBVIEW] Error exporting CSV: ${errorMessage}`);
       vscode.window.showErrorMessage(`Failed to export CSV: ${errorMessage}`);
     }
@@ -463,9 +501,9 @@ export class StatisticsWebviewProvider implements vscode.WebviewViewProvider, vs
 
     this.updateDebounceTimer = setTimeout(() => {
       this.postMessage({
-        type: 'matchAdded',
+        type: "matchAdded",
         match: event.record!,
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
       });
 
       this.log(`[WEBVIEW] Notified of new match: ${event.record!.matchId}`);
@@ -475,30 +513,56 @@ export class StatisticsWebviewProvider implements vscode.WebviewViewProvider, vs
   /**
    * Compute statistics from matches
    */
-  private async computeStatistics(filters: FilterState): Promise<StatisticsData> {
+  private async computeStatistics(
+    filters: FilterState,
+  ): Promise<StatisticsData> {
     const allMatches = this.matchStorageService.getAll();
     const filteredMatches = this.applyFilters(allMatches, filters);
 
     // Compute summary metrics
     const totalMatches = filteredMatches.length;
-    const wins = filteredMatches.filter(m => m.result === 'WIN').length;
-    const losses = filteredMatches.filter(m => m.result === 'LOSE').length;
-    const draws = filteredMatches.filter(m => m.result === 'DRAW').length;
+    const wins = filteredMatches.filter((m) => m.result === "WIN").length;
+    const losses = filteredMatches.filter((m) => m.result === "LOSE").length;
+    const draws = filteredMatches.filter((m) => m.result === "DRAW").length;
 
-    const firstPlayerMatches = filteredMatches.filter(m => m.order === 0);
-    const firstPlayerWins = firstPlayerMatches.filter(m => m.result === 'WIN').length;
+    const firstPlayerMatches = filteredMatches.filter((m) => m.order === 0);
+    const firstPlayerWins = firstPlayerMatches.filter(
+      (m) => m.result === "WIN",
+    ).length;
 
-    const arenaMatches = filteredMatches.filter(m => m.arena === true).length;
+    const arenaMatches = filteredMatches.filter((m) => m.arena === true).length;
     const soloMatches = totalMatches - arenaMatches;
 
     // Calculate averages
-    const avgDuration = totalMatches > 0
-      ? filteredMatches.reduce((sum, m) => sum + (m.durationMs || 0), 0) / totalMatches
-      : 0;
+    const avgDuration =
+      totalMatches > 0
+        ? filteredMatches.reduce((sum, m) => sum + (m.durationMs || 0), 0) /
+          totalMatches
+        : 0;
+
+    // Group by category (for category breakdown)
+    const categoryStats = new Map<string, number>();
+    filteredMatches.forEach((match) => {
+      const category = match.category || "(uncategorized)";
+      categoryStats.set(category, (categoryStats.get(category) || 0) + 1);
+    });
+
+    const categoriesArray = Array.from(categoryStats.entries())
+      .map(([name, count]) => ({ name, count }))
+      .sort((a, b) => b.count - a.count);
+
+    // Get all available categories from all matches
+    const allCategories = new Set<string>();
+    allMatches.forEach((match) => {
+      if (match.category) {
+        allCategories.add(match.category);
+      }
+    });
+    const availableCategories = Array.from(allCategories).sort();
 
     // Group by opponent
     const opponentStats = new Map<string, OpponentStat>();
-    filteredMatches.forEach(match => {
+    filteredMatches.forEach((match) => {
       if (!match.opponent) {
         return;
       }
@@ -509,13 +573,13 @@ export class StatisticsWebviewProvider implements vscode.WebviewViewProvider, vs
         wins: 0,
         losses: 0,
         draws: 0,
-        winRate: 0
+        winRate: 0,
       };
 
       stat.matches++;
-      if (match.result === 'WIN') {
+      if (match.result === "WIN") {
         stat.wins++;
-      } else if (match.result === 'LOSE') {
+      } else if (match.result === "LOSE") {
         stat.losses++;
       } else {
         stat.draws++;
@@ -527,8 +591,9 @@ export class StatisticsWebviewProvider implements vscode.WebviewViewProvider, vs
     });
 
     // Sort matches by timestamp descending
-    const sortedMatches = filteredMatches.sort((a, b) =>
-      new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+    const sortedMatches = filteredMatches.sort(
+      (a, b) =>
+        new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
     );
 
     return {
@@ -538,66 +603,93 @@ export class StatisticsWebviewProvider implements vscode.WebviewViewProvider, vs
         losses,
         draws,
         winRate: totalMatches > 0 ? (wins / totalMatches) * 100 : 0,
-        firstPlayerWinRate: firstPlayerMatches.length > 0
-          ? (firstPlayerWins / firstPlayerMatches.length) * 100
-          : 0,
+        firstPlayerWinRate:
+          firstPlayerMatches.length > 0
+            ? (firstPlayerWins / firstPlayerMatches.length) * 100
+            : 0,
         arenaMatches,
         soloMatches,
-        avgDuration
+        avgDuration,
+        categories: categoriesArray,
       },
       matches: sortedMatches,
-      opponents: Array.from(opponentStats.values()).sort((a, b) => b.matches - a.matches),
+      opponents: Array.from(opponentStats.values()).sort(
+        (a, b) => b.matches - a.matches,
+      ),
       filterCount: filteredMatches.length,
       totalCount: allMatches.length,
-      appliedFilters: filters
+      appliedFilters: filters,
+      availableCategories,
     };
   }
 
   /**
    * Apply filters to match list
    */
-  private applyFilters(matches: MatchRecord[], filters: FilterState): MatchRecord[] {
-    let filtered = [...matches];
+  private applyFilters(
+    matches: MatchRecord[],
+    filters: FilterState,
+  ): MatchRecord[] {
+    let filtered = matches;
 
+    // Filter by result
     if (filters.result) {
-      filtered = filtered.filter(m => m.result === filters.result);
+      filtered = filtered.filter((m) => m.result === filters.result);
     }
 
+    // Filter by order
     if (filters.order !== undefined && filters.order !== null) {
-      filtered = filtered.filter(m => m.order === filters.order);
+      filtered = filtered.filter((m) => m.order === filters.order);
     }
 
+    // Filter by arena
     if (filters.arena !== undefined && filters.arena !== null) {
-      filtered = filtered.filter(m => m.arena === filters.arena);
+      filtered = filtered.filter((m) => m.arena === filters.arena);
     }
 
+    // Filter by category
+    if (filters.category) {
+      if (filters.category === "(uncategorized)") {
+        filtered = filtered.filter((m) => !m.category);
+      } else {
+        filtered = filtered.filter((m) => m.category === filters.category);
+      }
+    }
+
+    // Filter by opponent
     if (filters.opponent) {
-      filtered = filtered.filter(m =>
-        m.opponent && m.opponent.toLowerCase().includes(filters.opponent!.toLowerCase())
+      filtered = filtered.filter((m) =>
+        m.opponent?.toLowerCase().includes(filters.opponent!.toLowerCase()),
       );
     }
 
+    // Filter by league
     if (filters.league) {
-      filtered = filtered.filter(m =>
-        m.league && m.league.toLowerCase().includes(filters.league!.toLowerCase())
+      filtered = filtered.filter((m) =>
+        m.league?.toLowerCase().includes(filters.league!.toLowerCase()),
       );
     }
 
+    // Filter by date range
     if (filters.dateRange) {
       const start = new Date(filters.dateRange.start).getTime();
       const end = new Date(filters.dateRange.end).getTime();
-      filtered = filtered.filter(m => {
+
+      filtered = filtered.filter((m) => {
         const matchTime = new Date(m.timestamp).getTime();
         return matchTime >= start && matchTime <= end;
       });
     }
 
+    // Filter by search text
     if (filters.searchText) {
       const searchLower = filters.searchText.toLowerCase();
-      filtered = filtered.filter(m =>
-        m.matchId.toLowerCase().includes(searchLower) ||
-        (m.opponent && m.opponent.toLowerCase().includes(searchLower)) ||
-        (m.league && m.league.toLowerCase().includes(searchLower))
+      filtered = filtered.filter(
+        (m) =>
+          m.matchId.toLowerCase().includes(searchLower) ||
+          m.opponent?.toLowerCase().includes(searchLower) ||
+          m.league?.toLowerCase().includes(searchLower) ||
+          m.category?.toLowerCase().includes(searchLower),
       );
     }
 
@@ -609,7 +701,7 @@ export class StatisticsWebviewProvider implements vscode.WebviewViewProvider, vs
    */
   private loadPersistedFilters(): FilterState {
     const stored = this.context.globalState.get<FilterState>(
-      StatisticsWebviewProvider.FILTER_STATE_KEY
+      StatisticsWebviewProvider.FILTER_STATE_KEY,
     );
 
     return stored || {};
@@ -621,7 +713,7 @@ export class StatisticsWebviewProvider implements vscode.WebviewViewProvider, vs
   private async persistFilters(filters: FilterState): Promise<void> {
     await this.context.globalState.update(
       StatisticsWebviewProvider.FILTER_STATE_KEY,
-      filters
+      filters,
     );
 
     this.log(`[WEBVIEW] Persisted filters: ${JSON.stringify(filters)}`);
@@ -639,10 +731,10 @@ export class StatisticsWebviewProvider implements vscode.WebviewViewProvider, vs
    */
   private getHtmlContent(webview: vscode.Webview): string {
     const scriptUri = webview.asWebviewUri(
-      vscode.Uri.joinPath(this.context.extensionUri, 'media', 'statistics.js')
+      vscode.Uri.joinPath(this.context.extensionUri, "media", "statistics.js"),
     );
     const styleUri = webview.asWebviewUri(
-      vscode.Uri.joinPath(this.context.extensionUri, 'media', 'statistics.css')
+      vscode.Uri.joinPath(this.context.extensionUri, "media", "statistics.css"),
     );
 
     const nonce = this.getNonce();
@@ -699,6 +791,14 @@ export class StatisticsWebviewProvider implements vscode.WebviewViewProvider, vs
           </select>
         </div>
 
+        <div class="filter-group">
+          <label for="filter-category">Category:</label>
+          <select id="filter-category" class="filter-input">
+            <option value="">All Categories</option>
+          </select>
+        </div>
+
+        <div class="filter-group">
         <div class="filter-group filter-group-wide">
           <label for="filter-search">Search:</label>
           <input
@@ -730,6 +830,7 @@ export class StatisticsWebviewProvider implements vscode.WebviewViewProvider, vs
               <th data-sortable data-column="result">Result</th>
               <th data-sortable data-column="order">Order</th>
               <th data-sortable data-column="arena">Type</th>
+              <th data-sortable data-column="category">Category</th>
               <th data-sortable data-column="opponent">Opponent</th>
               <th data-sortable data-column="league">League</th>
               <th data-sortable data-column="timestamp">Timestamp</th>
@@ -825,8 +926,9 @@ export class StatisticsWebviewProvider implements vscode.WebviewViewProvider, vs
    * Generate nonce for CSP
    */
   private getNonce(): string {
-    let text = '';
-    const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+    let text = "";
+    const possible =
+      "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
     for (let i = 0; i < 32; i++) {
       text += possible.charAt(Math.floor(Math.random() * possible.length));
     }
@@ -845,7 +947,7 @@ export class StatisticsWebviewProvider implements vscode.WebviewViewProvider, vs
    */
   dispose(): void {
     clearTimeout(this.updateDebounceTimer);
-    this.disposables.forEach(d => d.dispose());
+    this.disposables.forEach((d) => d.dispose());
     this.disposables = [];
   }
 }
