@@ -112,13 +112,21 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.payload?.gameId) {
       console.log("[BATTLE] Game ID:", message.payload.gameId);
     }
+    if (message.payload?.category) {
+      console.log("[BATTLE] Category:", message.payload.category);
+    }
     if (message.payload?.body) {
       console.log("[BATTLE] Processing battle response...");
+      console.log(
+        "[BATTLE] Received category from content script:",
+        message.payload.category || "(empty)",
+      );
       processBattleResponse(
         { url: message.payload.url },
         message.payload.body,
         message.payload.userId,
         message.payload.gameId,
+        message.payload.category,
       );
     } else {
       console.warn("[BATTLE] No body in payload");
@@ -496,10 +504,23 @@ function decodeChunks(chunks) {
   return text;
 }
 
-function processBattleResponse(details, body, userId, gameId) {
+function processBattleResponse(details, body, userId, gameId, category = "") {
   console.log("[BATTLE] processBattleResponse called");
-  console.log("[BATTLE] Context - userId:", userId, "gameId:", gameId);
-  const normalized = normalizeMatchPayload(body, userId, gameId);
+  console.log(
+    "[BATTLE] Context - userId:",
+    userId,
+    "gameId:",
+    gameId,
+    "category:",
+    category || "(empty)",
+  );
+  console.log(
+    "[BATTLE] Category parameter received:",
+    typeof category,
+    "value:",
+    category,
+  );
+  const normalized = normalizeMatchPayload(body, userId, gameId, category);
   if (!normalized) {
     console.warn("[BATTLE] Failed to normalize match payload");
     return;
@@ -518,10 +539,15 @@ function processBattleResponse(details, body, userId, gameId) {
   }
   seenMatches.set(normalized.match_id, now);
   console.log("[BATTLE] Forwarding match payload...");
-  forwardMatchPayload(normalized);
+  forwardMatchPayload(normalized, category);
 }
 
-function normalizeMatchPayload(body, contextUserId, contextGameId) {
+function normalizeMatchPayload(
+  body,
+  contextUserId,
+  contextGameId,
+  category = "",
+) {
   let data;
   try {
     data = JSON.parse(body);
@@ -692,6 +718,10 @@ function normalizeMatchPayload(body, contextUserId, contextGameId) {
 
     const timestamp = new Date().toISOString();
 
+    console.log(
+      "[BATTLE] normalizeMatchPayload returning with category:",
+      category || "(empty)",
+    );
     return {
       match_id: String(data.gameId),
       result: result,
@@ -699,6 +729,7 @@ function normalizeMatchPayload(body, contextUserId, contextGameId) {
       timestamp: timestamp,
       stdout: data.stdout || "",
       stderr: data.stderr || "",
+      category: category,
       metadata: {
         arena: Boolean(data?.arena ?? false),
         opponent: data?.opponent ?? "unknown",
@@ -751,13 +782,18 @@ function normalizeMatchPayload(body, contextUserId, contextGameId) {
   const stdout = match.stdout || data?.stdout || data?.logs?.stdout || "";
   const stderr = match.stderr || data?.stderr || data?.logs?.stderr || "";
   const timestamp = new Date().toISOString();
+  console.log(
+    "[BATTLE] normalizeMatchPayload (fallback path) returning with category:",
+    category || "(empty)",
+  );
   return {
     match_id: String(match.id),
     result: normalizedResult,
-    order,
+    order: order,
     timestamp: timestamp,
     stdout,
     stderr,
+    category: category,
     metadata: {
       arena: Boolean(data?.arena ?? match?.arena ?? false),
       opponent: match?.opponent ?? data?.opponent ?? "unknown",
@@ -770,17 +806,32 @@ function normalizeMatchPayload(body, contextUserId, contextGameId) {
   };
 }
 
-function forwardMatchPayload(payload) {
+function forwardMatchPayload(payload, category = "") {
   const deliveryId =
     typeof crypto?.randomUUID === "function"
       ? crypto.randomUUID()
       : `${Date.now()}-${Math.random()}`;
+
+  // Ensure category is included in payload
+  const payloadWithCategory = {
+    ...payload,
+    category: category || payload.category || "",
+  };
+
   const message = {
     type: "match_data",
-    payload,
+    payload: payloadWithCategory,
     deliveryId,
   };
   console.log("[BATTLE] Match queued for delivery:", deliveryId);
+  console.log(
+    "[BATTLE] Category in forwardMatchPayload:",
+    category || "(empty)",
+  );
+  console.log(
+    "[BATTLE] Final payload category:",
+    payloadWithCategory.category || "(empty)",
+  );
   console.log("[BATTLE] WebSocket state:", ws ? ws.readyState : "no socket");
   queueMatchDelivery(message);
 }

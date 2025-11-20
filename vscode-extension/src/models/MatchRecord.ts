@@ -12,11 +12,12 @@
 export interface MatchPayload {
   // Required fields
   match_id: string;
-  result: 'WIN' | 'LOSE' | 'DRAW';
+  result: "WIN" | "LOSE" | "DRAW";
   order: 0 | 1;
   timestamp: string; // ISO 8601 format
 
   // Optional metadata
+  category?: string; // Subdirectory for organizing matches (e.g., team name)
   arena?: boolean;
   opponent?: string;
   league?: string;
@@ -52,11 +53,12 @@ export interface MatchRecord {
   filename: string;
 
   // Match details
-  result: 'WIN' | 'LOSE' | 'DRAW';
+  result: "WIN" | "LOSE" | "DRAW";
   order: 0 | 1;
   arena: boolean;
 
   // Context
+  category?: string; // Category/group for organizing matches (e.g., team name)
   opponent?: string;
   league?: string;
   durationMs?: number;
@@ -92,11 +94,11 @@ export interface StoreResult {
  * Reasons for storage failure
  */
 export type StoreFailureReason =
-  | 'VALIDATION_FAILED'
-  | 'DUPLICATE'
-  | 'WRITE_FAILED'
-  | 'INTERNAL_ERROR'
-  | 'DIRECTORY_NOT_FOUND';
+  | "VALIDATION_FAILED"
+  | "DUPLICATE"
+  | "WRITE_FAILED"
+  | "INTERNAL_ERROR"
+  | "DIRECTORY_NOT_FOUND";
 
 /**
  * Schema validation result
@@ -111,7 +113,7 @@ export interface ValidationResult {
  * Events emitted by MatchStorageService
  */
 export interface MatchStorageEvent {
-  type: 'match_stored' | 'match_deleted' | 'index_rebuilt' | 'rotation_applied';
+  type: "match_stored" | "match_deleted" | "index_rebuilt" | "rotation_applied";
   matchId?: string;
   filename?: string;
   record?: MatchRecord;
@@ -141,7 +143,7 @@ export interface IndexStats {
  * Filter criteria for match queries
  */
 export interface MatchFilter {
-  result?: 'WIN' | 'LOSE' | 'DRAW' | 'WIN,LOSE' | 'WIN,DRAW' | 'LOSE,DRAW';
+  result?: "WIN" | "LOSE" | "DRAW" | "WIN,LOSE" | "WIN,DRAW" | "LOSE,DRAW";
   order?: 0 | 1;
   arena?: boolean;
   opponent?: string;
@@ -170,7 +172,7 @@ export interface RotationPolicy {
   enabled: boolean;
   maxMatches?: number;
   maxAgeDays?: number;
-  strategy: 'oldest' | 'by_result' | 'keep_wins';
+  strategy: "oldest" | "by_result" | "keep_wins";
 }
 
 /**
@@ -207,7 +209,7 @@ export interface ConfigChangeEvent {
 /**
  * Helper type for match result
  */
-export type MatchResult = 'WIN' | 'LOSE' | 'DRAW';
+export type MatchResult = "WIN" | "LOSE" | "DRAW";
 
 /**
  * Helper type for player order

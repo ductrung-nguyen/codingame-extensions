@@ -1,4 +1,11 @@
 (() => {
+  // Guard against multiple injections
+  if (window.__cgContentScriptLoaded) {
+    console.log("[CodinGame Content Script] Already loaded, skipping");
+    return;
+  }
+  window.__cgContentScriptLoaded = true;
+
   const EDITOR_POLL_INTERVAL_MS = 500;
   const EDITOR_POLL_TIMEOUT_MS = 20000;
   const STATUS_FADE_TIMEOUT_MS = 2500;
@@ -19,17 +26,65 @@
   let overlayTimer = null;
 
   // Battle capture variables (must be declared before init() call)
-  let batchCaptureButton = null;
-  let batchCaptureInProgress = false;
+  let captureButton = null;
+  let capturePanel = null;
+  let pauseResumeButton = null;
+  let categoryInput = null;
+  let captureStatusText = null;
+  let availableBattles = []; // Store battles from findLastBattlesByAgentId
   let capturedBattleIds = new Set();
   let continuousMonitoring = false;
   let monitoringInterval = null;
+  let capturePaused = false;
+  let captureInProgress = false;
+  let captureCategory = "";
+  let currentTeamName = "";
   let panelCaptureButton = null;
   let lastBattlesPanelObserver = null;
   let currentAgentId = null; // Track the agentId when viewing battles
-  let availableBattles = []; // Store battles from findLastBattlesByAgentId
 
   console.log("[CodinGame Content Script] Loading...");
+
+  // Check if extension context is valid
+  function isExtensionContextValid() {
+    try {
+      // Try to access chrome.runtime
+      if (!chrome || !chrome.runtime || !chrome.runtime.id) {
+        return false;
+      }
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  // Early validation
+  if (!isExtensionContextValid()) {
+    console.error(
+      "[CodinGame Content Script] Extension context is invalid. Please reload the page.",
+    );
+    // Show notification to user
+    const warning = document.createElement("div");
+    warning.style.cssText = `
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      z-index: 99999;
+      padding: 16px 20px;
+      background: #fee;
+      border: 2px solid #f88;
+      border-radius: 8px;
+      color: #c00;
+      font-family: -apple-system, sans-serif;
+      font-size: 14px;
+      font-weight: 600;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+    `;
+    warning.textContent = "⚠️ CodinGame extension needs page reload";
+    document.body?.appendChild(warning);
+    setTimeout(() => warning.remove(), 10000);
+    return;
+  }
 
   // Inject page script as external file (CSP-compliant)
   // This runs in page context where window.angular is accessible
@@ -116,6 +171,38 @@
       console.log(
         `[CodinGame Content Script] Stored ${battles.length} battles from leaderboard`,
       );
+
+      // Extract team name from first battle if available
+      if (battles[0]) {
+        const firstBattle = battles[0];
+        // Try to extract team/player name from battle data
+        let teamName = null;
+
+        // Check various possible fields in the battle object
+        if (firstBattle.agent?.pseudo) {
+          teamName = firstBattle.agent.pseudo;
+        } else if (firstBattle.agent?.nickname) {
+          teamName = firstBattle.agent.nickname;
+        } else if (firstBattle.player?.pseudo) {
+          teamName = firstBattle.player.pseudo;
+        } else if (firstBattle.player?.nickname) {
+          teamName = firstBattle.player.nickname;
+        } else if (firstBattle.codingamer?.pseudo) {
+          teamName = firstBattle.codingamer.pseudo;
+        } else if (firstBattle.codingamer?.nickname) {
+          teamName = firstBattle.codingamer.nickname;
+        }
+
+        // If not found in battle data, try to extract from DOM
+        if (!teamName) {
+          teamName = extractTeamName();
+        }
+
+        if (teamName) {
+          setDefaultCategory(teamName);
+        }
+      }
+
       showStatus(
         `${battles.length} battles loaded. Click capture button to save them.`,
         "success",
@@ -1280,17 +1367,136 @@
   // Auto-injection was causing UI bugs - button was appearing on leaderboard rows
   // Users should use the floating "📊 Capture All Battles" button instead
 
-  function createBatchCaptureButton() {
-    if (batchCaptureButton) return;
+  function sanitizeCategory(name) {
+    if (!name) return "";
+    return name
+      .toLowerCase()
+      .replace(/[^a-z0-9_-]/g, "-")
+      .replace(/-+/g, "-")
+      .replace(/^-|-$/g, "");
+  }
 
-    batchCaptureButton = document.createElement("button");
-    batchCaptureButton.textContent = "📊 Capture All Battles";
-    batchCaptureButton.style.cssText = `
+  function setDefaultCategory(teamName) {
+    if (!teamName) return;
+
+    currentTeamName = teamName;
+    const sanitized = sanitizeCategory(teamName);
+
+    // Only set if user hasn't customized it yet
+    if (
+      !captureCategory ||
+      captureCategory === sanitizeCategory(currentTeamName)
+    ) {
+      captureCategory = sanitized;
+
+      // Update input field if it exists
+      if (categoryInput) {
+        categoryInput.value = captureCategory;
+      }
+
+      console.log(
+        "[CodinGame Content Script] Auto-set category:",
+        captureCategory,
+      );
+    }
+  }
+
+  function extractTeamName() {
+    // Try to extract team name from the page when viewing last battles
+    const selectors = [
+      ".leaderboard-row.selected .pseudo",
+      ".leaderboard-item.selected .team-name",
+      ".leaderboard-item.selected .player-name",
+      '[class*="selected"] .pseudo',
+      ".cg-last-battles-header .team-name",
+    ];
+
+    for (const selector of selectors) {
+      const element = document.querySelector(selector);
+      if (element && element.textContent.trim()) {
+        return element.textContent.trim();
+      }
+    }
+
+    return "";
+  }
+
+  function createBatchCaptureButton() {
+    if (capturePanel) return;
+
+    // Create main panel container
+    capturePanel = document.createElement("div");
+    capturePanel.id = "cg-capture-panel";
+    capturePanel.style.cssText = `
       position: fixed;
       top: 80px;
       right: 20px;
       z-index: 10000;
-      padding: 12px 20px;
+      padding: 16px;
+      background: white;
+      border-radius: 12px;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      min-width: 280px;
+    `;
+
+    // Category input
+    const categoryLabel = document.createElement("label");
+    categoryLabel.textContent = "Category:";
+    categoryLabel.style.cssText = `
+      display: block;
+      font-size: 12px;
+      font-weight: 600;
+      color: #64748b;
+      margin-bottom: 6px;
+    `;
+
+    categoryInput = document.createElement("input");
+    categoryInput.id = "cg-capture-category";
+    categoryInput.type = "text";
+    categoryInput.placeholder = "e.g., team-name";
+    categoryInput.value = captureCategory;
+    categoryInput.style.cssText = `
+      width: 100%;
+      padding: 8px 12px;
+      border: 1px solid #e2e8f0;
+      border-radius: 6px;
+      font-size: 13px;
+      margin-bottom: 12px;
+      box-sizing: border-box;
+    `;
+    categoryInput.oninput = (e) => {
+      captureCategory = sanitizeCategory(e.target.value);
+      e.target.value = captureCategory;
+    };
+
+    // Set default value if we already have team name
+    if (currentTeamName && !captureCategory) {
+      setDefaultCategory(currentTeamName);
+    }
+
+    // Status text
+    captureStatusText = document.createElement("div");
+    captureStatusText.style.cssText = `
+      font-size: 12px;
+      color: #64748b;
+      margin-bottom: 12px;
+      min-height: 18px;
+    `;
+
+    // Button container
+    const buttonContainer = document.createElement("div");
+    buttonContainer.style.cssText = `
+      display: flex;
+      gap: 8px;
+    `;
+
+    // Capture button
+    captureButton = document.createElement("button");
+    captureButton.textContent = "📊 Capture";
+    captureButton.style.cssText = `
+      flex: 1;
+      padding: 10px 16px;
       background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
       color: white;
       border: none;
@@ -1298,57 +1504,124 @@
       font-size: 14px;
       font-weight: 600;
       cursor: pointer;
-      box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
-      transition: all 0.3s ease;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      transition: all 0.2s ease;
     `;
 
-    batchCaptureButton.onmouseenter = () => {
-      if (!batchCaptureInProgress) {
-        batchCaptureButton.style.transform = "translateY(-2px)";
-        batchCaptureButton.style.boxShadow =
-          "0 6px 16px rgba(102, 126, 234, 0.5)";
+    captureButton.onmouseenter = () => {
+      if (!captureInProgress) {
+        captureButton.style.transform = "translateY(-1px)";
+        captureButton.style.boxShadow = "0 4px 12px rgba(102, 126, 234, 0.4)";
       }
     };
 
-    batchCaptureButton.onmouseleave = () => {
-      batchCaptureButton.style.transform = "translateY(0)";
-      batchCaptureButton.style.boxShadow =
-        "0 4px 12px rgba(102, 126, 234, 0.4)";
+    captureButton.onmouseleave = () => {
+      captureButton.style.transform = "translateY(0)";
+      captureButton.style.boxShadow = "none";
     };
 
-    batchCaptureButton.onclick = async () => {
-      if (batchCaptureInProgress) {
-        // If monitoring is active, clicking stops it
-        if (continuousMonitoring) {
-          stopContinuousMonitoring();
+    captureButton.onclick = async () => {
+      if (captureInProgress) return;
+
+      // Extract team name if not already set
+      if (!currentTeamName) {
+        currentTeamName = extractTeamName();
+        if (currentTeamName && !captureCategory) {
+          captureCategory = sanitizeCategory(currentTeamName);
+          categoryInput.value = captureCategory;
         }
-        return;
       }
+
       await captureBattlesAutomatically();
     };
 
-    document.body.appendChild(batchCaptureButton);
-    console.log("[CodinGame Content Script] Batch capture button created");
+    // Pause/Resume button
+    pauseResumeButton = document.createElement("button");
+    pauseResumeButton.textContent = "⏸️";
+    pauseResumeButton.style.cssText = `
+      padding: 10px 16px;
+      background: #f1f5f9;
+      color: #475569;
+      border: none;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      display: none;
+    `;
+
+    pauseResumeButton.onmouseenter = () => {
+      pauseResumeButton.style.background = "#e2e8f0";
+    };
+
+    pauseResumeButton.onmouseleave = () => {
+      pauseResumeButton.style.background = "#f1f5f9";
+    };
+
+    pauseResumeButton.onclick = () => {
+      capturePaused = !capturePaused;
+      pauseResumeButton.textContent = capturePaused ? "▶️" : "⏸️";
+      pauseResumeButton.style.background = capturePaused
+        ? "#fef3c7"
+        : "#f1f5f9";
+      updateCaptureStatus(
+        capturePaused ? "⏸️ Paused" : "▶️ Resuming...",
+        capturePaused ? "warning" : "pending",
+      );
+    };
+
+    // Assemble panel
+    buttonContainer.appendChild(captureButton);
+    buttonContainer.appendChild(pauseResumeButton);
+
+    capturePanel.appendChild(categoryLabel);
+    capturePanel.appendChild(categoryInput);
+    capturePanel.appendChild(captureStatusText);
+    capturePanel.appendChild(buttonContainer);
+
+    document.body.appendChild(capturePanel);
+    console.log("[CodinGame Content Script] Capture panel created");
   }
 
   function updateBatchCaptureButton(text, inProgress = false) {
-    if (!batchCaptureButton) return;
+    captureInProgress = inProgress;
 
-    batchCaptureInProgress = inProgress;
-    batchCaptureButton.textContent = text;
-
-    if (inProgress) {
-      batchCaptureButton.style.cursor = "not-allowed";
-      batchCaptureButton.style.opacity = "0.7";
-      batchCaptureButton.style.background =
-        "linear-gradient(135deg, #94a3b8 0%, #64748b 100%)";
-    } else {
-      batchCaptureButton.style.cursor = "pointer";
-      batchCaptureButton.style.opacity = "1";
-      batchCaptureButton.style.background =
-        "linear-gradient(135deg, #667eea 0%, #764ba2 100%)";
+    if (captureButton) {
+      captureButton.textContent = text;
+      captureButton.style.cursor = inProgress ? "not-allowed" : "pointer";
+      captureButton.style.opacity = inProgress ? "0.7" : "1";
+      captureButton.style.background = inProgress
+        ? "linear-gradient(135deg, #94a3b8 0%, #64748b 100%)"
+        : "linear-gradient(135deg, #667eea 0%, #764ba2 100%)";
     }
+
+    if (pauseResumeButton) {
+      pauseResumeButton.style.display = inProgress ? "block" : "none";
+      if (!inProgress) {
+        capturePaused = false;
+        pauseResumeButton.textContent = "⏸️";
+        pauseResumeButton.style.background = "#f1f5f9";
+      }
+    }
+
+    if (!inProgress && captureStatusText) {
+      captureStatusText.textContent = "";
+    }
+  }
+
+  function updateCaptureStatus(message, type = "info") {
+    if (!captureStatusText) return;
+
+    const colors = {
+      success: "#10b981",
+      error: "#ef4444",
+      warning: "#f59e0b",
+      pending: "#667eea",
+      info: "#64748b",
+    };
+
+    captureStatusText.textContent = message;
+    captureStatusText.style.color = colors[type] || colors.info;
   }
 
   async function captureBattlesAutomatically(startMonitoring = true) {
@@ -1356,6 +1629,19 @@
       "[CodinGame Content Script] Starting automatic battle capture...",
     );
     updateBatchCaptureButton("⏳ Fetching battles...", true);
+
+    // Reset pause state
+    capturePaused = false;
+
+    // Extract and set default category from team name if available
+    if (!currentTeamName) {
+      currentTeamName = extractTeamName();
+    }
+
+    // Auto-set category from team name if not already set
+    if (currentTeamName) {
+      setDefaultCategory(currentTeamName);
+    }
 
     try {
       // Get current user ID (test session handle is optional)
@@ -1370,6 +1656,7 @@
       console.log("[CodinGame Content Script] Session info:", {
         userId,
         testSessionHandle,
+        category: captureCategory,
       });
 
       // Fetch list of last battles
@@ -1421,7 +1708,8 @@
         }
 
         showStatus(message, "error");
-        updateBatchCaptureButton("📊 Capture All Battles", false);
+        updateBatchCaptureButton("📊 Capture", false);
+        updateCaptureStatus(message, "error");
         console.log(
           "[CodinGame Content Script] 💡 Tip: On the leaderboard page:",
         );
@@ -1451,8 +1739,12 @@
           "success",
         );
         updateBatchCaptureButton(
-          continuousMonitoring ? "🔄 Monitoring..." : "📊 Capture All Battles",
+          continuousMonitoring ? "🔄 Monitoring..." : "📊 Capture",
           false,
+        );
+        updateCaptureStatus(
+          `All ${battles.length} battles captured`,
+          "success",
         );
         return;
       }
@@ -1464,6 +1756,10 @@
         `Found ${newBattles.length} new battles. Starting capture...`,
         "success",
       );
+      updateCaptureStatus(
+        `Capturing ${newBattles.length} battles...`,
+        "pending",
+      );
 
       // Capture each new battle
       let successCount = 0;
@@ -1474,10 +1770,20 @@
         const progress = `${i + 1}/${newBattles.length}`;
         updateBatchCaptureButton(`⏳ ${progress}`, true);
         showStatus(`Capturing battle ${progress}...`, "pending");
+        updateCaptureStatus(`Capturing ${progress}...`, "pending");
 
         try {
-          // Fetch and send battle to background script
-          await fetchAndProcessBattle(battle.gameId, userId);
+          // Wait if paused
+          while (capturePaused) {
+            await new Promise((resolve) => setTimeout(resolve, 100));
+          }
+
+          // Fetch and send battle to background script with category
+          console.log(
+            `[CodinGame Content Script] About to fetch battle ${battle.gameId} with category:`,
+            captureCategory || "(empty)",
+          );
+          await fetchAndProcessBattle(battle.gameId, userId, captureCategory);
 
           capturedBattleIds.add(battle.gameId); // Mark as captured
           successCount++;
@@ -1542,7 +1848,7 @@
 
     // Check for new battles every 10 seconds
     monitoringInterval = setInterval(async () => {
-      if (!batchCaptureInProgress) {
+      if (!captureInProgress) {
         console.log("[CodinGame Content Script] Checking for new battles...");
         await captureBattlesAutomatically(false);
       }
@@ -1881,16 +2187,24 @@
     }
   }
 
-  async function fetchAndProcessBattle(gameId, userId) {
+  async function fetchAndProcessBattle(gameId, userId, category = "") {
     try {
       console.log(`[CodinGame Content Script] Fetching battle ${gameId}...`);
+      console.log(
+        `[CodinGame Content Script] Category for battle ${gameId}:`,
+        category || "(empty)",
+      );
 
+      // Fetch battle data from CodinGame API
       const response = await fetch(
         "https://www.codingame.com/services/gameResult/findByGameId",
         {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json;charset=UTF-8",
+          },
           body: JSON.stringify([gameId, userId]),
+          credentials: "include",
         },
       );
 
@@ -1916,26 +2230,58 @@
         `[CodinGame Content Script] Fetched battle ${gameId}, size: ${battleData.length} bytes`,
       );
 
-      // Send to background script for processing with userId context
+      // Send to background script for processing with userId context and category
       try {
-        const response = await chrome.runtime.sendMessage({
+        // Check if extension context is still valid before sending
+        if (!isExtensionContextValid()) {
+          throw new Error(
+            "Extension context invalidated - please refresh the page",
+          );
+        }
+
+        const messagePayload = {
           type: "battle_response_captured",
           payload: {
             url: "/services/gameResult/findByGameId",
             body: battleData,
             userId: userId,
             gameId: gameId,
+            category: category,
           },
-        });
+        };
+
+        console.log(
+          `[CodinGame Content Script] Sending battle ${gameId} to background with category:`,
+          category || "(empty)",
+        );
+
+        const response = await chrome.runtime.sendMessage(messagePayload);
 
         console.log(
           `[CodinGame Content Script] ✓ Battle ${gameId} sent to background script`,
+        );
+        console.log(
+          `[CodinGame Content Script] Payload category sent:`,
+          messagePayload.payload.category,
         );
         console.log(
           `[CodinGame Content Script] Background response:`,
           response,
         );
       } catch (sendError) {
+        // Handle extension context invalidation gracefully
+        if (
+          sendError.message &&
+          sendError.message.includes("Extension context invalidated")
+        ) {
+          console.error(
+            `[CodinGame Content Script] Extension was reloaded. Please refresh the page to continue capturing.`,
+          );
+          throw new Error(
+            `Extension context invalidated - please refresh the page`,
+          );
+        }
+
         console.error(
           `[CodinGame Content Script] ✗ Failed to send battle ${gameId} to background:`,
           sendError,
@@ -2384,11 +2730,15 @@
       window.location.href.includes("/leaderboard") ||
       window.location.href.includes("/hackathon/");
 
-    if (isArenaPage && !batchCaptureButton) {
+    if (isArenaPage && !capturePanel) {
       createBatchCaptureButton();
-    } else if (!isArenaPage && batchCaptureButton) {
-      batchCaptureButton.remove();
-      batchCaptureButton = null;
+    } else if (!isArenaPage && capturePanel) {
+      capturePanel.remove();
+      capturePanel = null;
+      captureButton = null;
+      pauseResumeButton = null;
+      categoryInput = null;
+      captureStatusText = null;
     }
   }
 
@@ -2466,6 +2816,21 @@
       console.log("IDs:", Array.from(capturedBattleIds));
       return Array.from(capturedBattleIds);
     },
+
+    setCategory: (category) => {
+      captureCategory = sanitizeCategory(category);
+      const categoryInput = document.getElementById("cg-capture-category");
+      if (categoryInput) {
+        categoryInput.value = captureCategory;
+      }
+      console.log("Category set to:", captureCategory);
+      return captureCategory;
+    },
+
+    getCategory: () => {
+      console.log("Current category:", captureCategory);
+      return captureCategory;
+    },
   };
 
   console.log(
@@ -2481,5 +2846,11 @@
   );
   console.log(
     "  window.__cgDebug.getCapturedBattles()       - Show already captured battle IDs",
+  );
+  console.log(
+    "  window.__cgDebug.setCategory('name')        - Set capture category",
+  );
+  console.log(
+    "  window.__cgDebug.getCategory()              - Get current category",
   );
 })();

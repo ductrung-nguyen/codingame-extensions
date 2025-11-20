@@ -17,10 +17,10 @@
  * Task 2.7: Diagnostic & Recovery Commands
  */
 
-import * as vscode from 'vscode';
-import * as path from 'path';
-import * as fs from 'fs/promises';
-import { existsSync } from 'fs';
+import * as vscode from "vscode";
+import * as path from "path";
+import * as fs from "fs/promises";
+import { existsSync } from "fs";
 import {
   MatchPayload,
   MatchRecord,
@@ -30,12 +30,12 @@ import {
   ReprocessResult,
   RotationPolicy,
   IntegrityReport,
-  WriteResult
-} from '../models/MatchRecord';
-import { MatchDataValidator } from './MatchDataValidator';
-import { MatchIndexManager } from './MatchIndexManager';
-import { ConfigurationService } from './ConfigurationService';
-import { FailedPayload } from '../diagnostics/types';
+  WriteResult,
+} from "../models/MatchRecord";
+import { MatchDataValidator } from "./MatchDataValidator";
+import { MatchIndexManager } from "./MatchIndexManager";
+import { ConfigurationService } from "./ConfigurationService";
+import { FailedPayload } from "../diagnostics/types";
 
 export class MatchStorageService implements vscode.Disposable {
   private disposables: vscode.Disposable[] = [];
@@ -53,21 +53,21 @@ export class MatchStorageService implements vscode.Disposable {
 
   constructor(
     private configService: ConfigurationService,
-    private outputChannel: vscode.OutputChannel
+    private outputChannel: vscode.OutputChannel,
   ) {
     this.validator = new MatchDataValidator();
     this.indexManager = new MatchIndexManager();
-    this.matchesDirectory = '';
+    this.matchesDirectory = "";
 
     this.disposables.push(this.storageEmitter);
 
     // Listen for configuration changes
     this.disposables.push(
-      this.configService.onConfigChange(event => {
-        if (event.key === 'codingame.matches.directory') {
+      this.configService.onConfigChange((event) => {
+        if (event.key === "codingame.matches.directory") {
           this.handleDirectoryChange(event.newValue as string);
         }
-      })
+      }),
     );
   }
 
@@ -76,7 +76,7 @@ export class MatchStorageService implements vscode.Disposable {
    * Loads configuration and rebuilds index if needed
    */
   async initialize(): Promise<void> {
-    this.log('[MATCH] Initializing match storage service...');
+    this.log("[MATCH] Initializing match storage service...");
 
     try {
       // Get matches directory from configuration
@@ -84,19 +84,24 @@ export class MatchStorageService implements vscode.Disposable {
 
       // Create directory if it doesn't exist
       if (!existsSync(this.matchesDirectory)) {
-        this.log(`[MATCH] Directory does not exist, creating: ${this.matchesDirectory}`);
+        this.log(
+          `[MATCH] Directory does not exist, creating: ${this.matchesDirectory}`,
+        );
         await fs.mkdir(this.matchesDirectory, { recursive: true });
         this.log(`[MATCH] Directory created successfully`);
       }
 
       // Auto-rebuild index if configured
-      const autoReindex = this.configService.get<boolean>('matches.autoReindex', true);
+      const autoReindex = this.configService.get<boolean>(
+        "matches.autoReindex",
+        true,
+      );
       if (autoReindex) {
         await this.rebuildIndex();
       }
 
       this.isInitialized = true;
-      this.log('[MATCH] Storage service initialized successfully');
+      this.log("[MATCH] Storage service initialized successfully");
       this.log(`[MATCH] Directory: ${this.matchesDirectory}`);
       this.log(`[MATCH] Index size: ${this.indexManager.size()} matches`);
     } catch (error) {
@@ -113,8 +118,8 @@ export class MatchStorageService implements vscode.Disposable {
     if (!this.isInitialized) {
       return {
         success: false,
-        reason: 'INTERNAL_ERROR',
-        error: 'Storage service not initialized'
+        reason: "INTERNAL_ERROR",
+        error: "Storage service not initialized",
       };
     }
 
@@ -124,63 +129,86 @@ export class MatchStorageService implements vscode.Disposable {
       // Step 1: Validate schema
       const validationResult = this.validator.validate(payload);
       if (!validationResult.valid) {
-        this.log(`[MATCH] Validation failed: ${validationResult.errors?.join(', ')}`);
+        this.log(
+          `[MATCH] Validation failed: ${validationResult.errors?.join(", ")}`,
+        );
         return {
           success: false,
-          reason: 'VALIDATION_FAILED',
-          errors: validationResult.errors
+          reason: "VALIDATION_FAILED",
+          errors: validationResult.errors,
         };
       }
 
       const matchData = validationResult.data as MatchPayload;
 
-      // Step 2: Check for duplicates
-      if (this.isDuplicate(matchData.match_id)) {
-        this.log(`[MATCH] Duplicate detected: ${matchData.match_id} (dropped)`);
+      // Step 2: Check for duplicates (considering category)
+      const category = matchData.category || "";
+      if (this.isDuplicate(matchData.match_id, category)) {
+        const categoryInfo = category ? ` in category '${category}'` : "";
+        this.log(
+          `[MATCH] Duplicate detected: ${matchData.match_id}${categoryInfo} (dropped)`,
+        );
         return {
           success: false,
-          reason: 'DUPLICATE',
-          matchId: matchData.match_id
+          reason: "DUPLICATE",
+          matchId: matchData.match_id,
         };
       }
 
-      // Step 3: Generate filename
-      const filename = this.generateFilename(matchData);
-      const filepath = path.join(this.matchesDirectory, filename);
+      // Step 3: Determine target directory based on category
+      let targetDirectory = this.matchesDirectory;
 
-      // Step 4: Atomic write
+      if (category) {
+        // Create subdirectory for category
+        targetDirectory = path.join(this.matchesDirectory, category);
+        if (!existsSync(targetDirectory)) {
+          this.log(`[MATCH] Creating category directory: ${category}`);
+          await fs.mkdir(targetDirectory, { recursive: true });
+        }
+      }
+
+      // Step 4: Generate filename
+      const filename = this.generateFilename(matchData);
+      const filepath = path.join(targetDirectory, filename);
+
+      // Step 5: Atomic write
       const writeResult = await this.atomicWrite(filepath, matchData);
       if (!writeResult.success) {
         // Track failed payload for recovery (Task 2.7)
-        this.trackFailedPayload(matchData, writeResult.error || 'WRITE_FAILED');
+        this.trackFailedPayload(matchData, writeResult.error || "WRITE_FAILED");
         return {
           success: false,
-          reason: 'WRITE_FAILED',
-          error: writeResult.error
+          reason: "WRITE_FAILED",
+          error: writeResult.error,
         };
       }
 
-      // Step 5: Create match record
-      const record = await this.createMatchRecord(matchData, filename, filepath);
+      // Step 6: Create match record
+      const record = await this.createMatchRecord(
+        matchData,
+        filename,
+        filepath,
+      );
 
-      // Step 6: Update index
+      // Step 7: Update index
       this.indexManager.add(record);
 
-      // Step 7: Emit event
+      // Step 8: Emit event
       this.storageEmitter.fire({
-        type: 'match_stored',
+        type: "match_stored",
         matchId: matchData.match_id,
         filename,
         record,
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
       });
 
       const duration = Date.now() - startTime;
-      this.log(`[MATCH] Stored ${filename} (${duration}ms)`);
+      const displayPath = category ? `${category}/${filename}` : filename;
+      this.log(`[MATCH] Stored ${displayPath} (${duration}ms)`);
 
-      // Step 8: Check rotation policy
+      // Step 9: Check rotation policy
       if (this.shouldApplyRotation()) {
-        this.applyRotationPolicy().catch(err => {
+        this.applyRotationPolicy().catch((err) => {
           this.log(`[MATCH] Rotation failed: ${err.message}`);
         });
       }
@@ -189,21 +217,23 @@ export class MatchStorageService implements vscode.Disposable {
         success: true,
         matchId: matchData.match_id,
         filename,
-        duration
+        duration,
       };
-
     } catch (error) {
       this.log(`[MATCH] Unexpected error: ${(error as Error).message}`);
 
       // Track failed payload for recovery (Task 2.7)
-      if (payload && typeof payload === 'object' && 'match_id' in payload) {
-        this.trackFailedPayload(payload as MatchPayload, (error as Error).message);
+      if (payload && typeof payload === "object" && "match_id" in payload) {
+        this.trackFailedPayload(
+          payload as MatchPayload,
+          (error as Error).message,
+        );
       }
 
       return {
         success: false,
-        reason: 'INTERNAL_ERROR',
-        error: (error as Error).message
+        reason: "INTERNAL_ERROR",
+        error: (error as Error).message,
       };
     }
   }
@@ -211,7 +241,13 @@ export class MatchStorageService implements vscode.Disposable {
   /**
    * Check if a match ID already exists
    */
-  isDuplicate(matchId: string): boolean {
+  isDuplicate(matchId: string, category?: string): boolean {
+    // If category is specified, check for match in that specific category
+    if (category) {
+      const categoryKey = `${category}:${matchId}`;
+      return this.indexManager.has(categoryKey);
+    }
+    // Otherwise, check if match exists in any category
     return this.indexManager.has(matchId);
   }
 
@@ -271,49 +307,78 @@ export class MatchStorageService implements vscode.Disposable {
    * Rebuild index from filesystem
    */
   async rebuildIndex(): Promise<void> {
-    this.log('[MATCH] Rebuilding index from filesystem...');
+    this.log("[MATCH] Rebuilding index from filesystem...");
 
     const startTime = Date.now();
     this.indexManager.clear();
 
     try {
-      const files = await fs.readdir(this.matchesDirectory);
-      const jsonFiles = files.filter(f => f.endsWith('.json') && !f.startsWith('.'));
-
       let processed = 0;
       let errors = 0;
 
-      for (const filename of jsonFiles) {
-        try {
-          const filepath = path.join(this.matchesDirectory, filename);
-          const content = await fs.readFile(filepath, 'utf8');
-          const matchData = JSON.parse(content) as MatchPayload;
+      // Helper function to scan a directory for JSON files
+      const scanDirectory = async (dirPath: string, category: string = "") => {
+        const entries = await fs.readdir(dirPath, { withFileTypes: true });
 
-          const record = await this.createMatchRecord(matchData, filename, filepath);
-          this.indexManager.add(record);
-          processed++;
+        for (const entry of entries) {
+          const fullPath = path.join(dirPath, entry.name);
 
-        } catch (error) {
-          this.log(`[MATCH] Failed to index ${filename}: ${(error as Error).message}`);
-          errors++;
+          if (entry.isDirectory()) {
+            // Recursively scan subdirectory (category folder)
+            await scanDirectory(fullPath, entry.name);
+          } else if (
+            entry.isFile() &&
+            entry.name.endsWith(".json") &&
+            !entry.name.startsWith(".")
+          ) {
+            // Process JSON file
+            try {
+              const content = await fs.readFile(fullPath, "utf8");
+              const matchData = JSON.parse(content) as MatchPayload;
+
+              // Ensure category is set from directory structure if not in payload
+              if (category && !matchData.category) {
+                matchData.category = category;
+              }
+
+              const record = await this.createMatchRecord(
+                matchData,
+                entry.name,
+                fullPath,
+              );
+              this.indexManager.add(record);
+              processed++;
+            } catch (error) {
+              const displayPath = category
+                ? `${category}/${entry.name}`
+                : entry.name;
+              this.log(
+                `[MATCH] Failed to index ${displayPath}: ${(error as Error).message}`,
+              );
+              errors++;
+            }
+          }
         }
-      }
+      };
+
+      // Start scanning from the matches directory
+      await scanDirectory(this.matchesDirectory);
 
       const duration = Date.now() - startTime;
-      this.log(`[MATCH] Index rebuilt: ${processed} matches, ${errors} errors (${duration}ms)`);
+      this.log(
+        `[MATCH] Index rebuilt: ${processed} matches, ${errors} errors (${duration}ms)`,
+      );
       this.log(`[MATCH] ${this.indexManager.getSummary()}`);
 
       // Emit rebuild complete event
       this.storageEmitter.fire({
-        type: 'index_rebuilt',
+        type: "index_rebuilt",
         timestamp: new Date().toISOString(),
         metadata: {
           matchCount: processed,
           errorCount: errors,
-          duration
-        }
+        },
       });
-
     } catch (error) {
       this.log(`[MATCH] Index rebuild failed: ${(error as Error).message}`);
       throw error;
@@ -324,7 +389,8 @@ export class MatchStorageService implements vscode.Disposable {
    * Reprocess matches (re-validate and update index)
    */
   async reprocessMatches(matchIds?: string[]): Promise<ReprocessResult> {
-    const targetIds = matchIds || Array.from(this.indexManager.getAll().map(r => r.matchId));
+    const targetIds =
+      matchIds || Array.from(this.indexManager.getAll().map((r) => r.matchId));
 
     let processed = 0;
     let errors = 0;
@@ -334,25 +400,32 @@ export class MatchStorageService implements vscode.Disposable {
       try {
         const record = this.indexManager.get(matchId);
         if (!record) {
-          throw new Error('Match not found in index');
+          throw new Error("Match not found in index");
         }
 
-        const content = await fs.readFile(record.filepath, 'utf8');
+        const content = await fs.readFile(record.filepath, "utf8");
         const matchData = JSON.parse(content) as MatchPayload;
 
         // Re-validate
         const validationResult = this.validator.validate(matchData);
         if (!validationResult.valid) {
-          throw new Error(`Validation failed: ${validationResult.errors?.join(', ')}`);
+          throw new Error(
+            `Validation failed: ${validationResult.errors?.join(", ")}`,
+          );
         }
 
         // Update index with fresh data
-        const updatedRecord = await this.createMatchRecord(matchData, record.filename, record.filepath);
+        const updatedRecord = await this.createMatchRecord(
+          matchData,
+          record.filename,
+          record.filepath,
+        );
         this.indexManager.update(matchId, updatedRecord);
         processed++;
-
       } catch (error) {
-        this.log(`[MATCH] Reprocess failed for ${matchId}: ${(error as Error).message}`);
+        this.log(
+          `[MATCH] Reprocess failed for ${matchId}: ${(error as Error).message}`,
+        );
         errors++;
         errorDetails.push({ matchId, error: (error as Error).message });
       }
@@ -363,7 +436,7 @@ export class MatchStorageService implements vscode.Disposable {
     return {
       processed,
       errors,
-      errorDetails
+      errorDetails,
     };
   }
 
@@ -385,17 +458,18 @@ export class MatchStorageService implements vscode.Disposable {
 
       // Emit event
       this.storageEmitter.fire({
-        type: 'match_deleted',
+        type: "match_deleted",
         matchId,
         filename: record.filename,
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
       });
 
       this.log(`[MATCH] Deleted ${record.filename}`);
       return true;
-
     } catch (error) {
-      this.log(`[MATCH] Failed to delete ${matchId}: ${(error as Error).message}`);
+      this.log(
+        `[MATCH] Failed to delete ${matchId}: ${(error as Error).message}`,
+      );
       return false;
     }
   }
@@ -432,7 +506,9 @@ export class MatchStorageService implements vscode.Disposable {
 
     // Strategy 1: Max matches limit
     if (policy.maxMatches && matches.length > policy.maxMatches) {
-      const oldest = this.indexManager.getOldest(matches.length - policy.maxMatches);
+      const oldest = this.indexManager.getOldest(
+        matches.length - policy.maxMatches,
+      );
       toDelete = [...toDelete, ...oldest];
     }
 
@@ -441,23 +517,23 @@ export class MatchStorageService implements vscode.Disposable {
       const cutoffDate = new Date();
       cutoffDate.setDate(cutoffDate.getDate() - policy.maxAgeDays);
 
-      const oldMatches = matches.filter(m =>
-        new Date(m.timestamp) < cutoffDate
+      const oldMatches = matches.filter(
+        (m) => new Date(m.timestamp) < cutoffDate,
       );
 
       toDelete = [...toDelete, ...oldMatches];
     }
 
     // Strategy 3: Keep wins only
-    if (policy.strategy === 'keep_wins') {
-      const losesAndDraws = matches.filter(m => m.result !== 'WIN');
+    if (policy.strategy === "keep_wins") {
+      const losesAndDraws = matches.filter((m) => m.result !== "WIN");
       toDelete = [...toDelete, ...losesAndDraws];
     }
 
     // Deduplicate
-    const uniqueToDelete = Array.from(new Set(toDelete.map(r => r.matchId)))
-      .map(id => this.indexManager.get(id))
-      .filter(r => r !== undefined) as MatchRecord[];
+    const uniqueToDelete = Array.from(new Set(toDelete.map((r) => r.matchId)))
+      .map((id) => this.indexManager.get(id))
+      .filter((r) => r !== undefined) as MatchRecord[];
 
     // Delete
     for (const record of uniqueToDelete) {
@@ -468,12 +544,12 @@ export class MatchStorageService implements vscode.Disposable {
       this.log(`[MATCH] Rotation: deleted ${uniqueToDelete.length} matches`);
 
       this.storageEmitter.fire({
-        type: 'rotation_applied',
+        type: "rotation_applied",
         timestamp: new Date().toISOString(),
         metadata: {
           deletedCount: uniqueToDelete.length,
-          policy
-        }
+          policy,
+        },
       });
     }
 
@@ -484,7 +560,7 @@ export class MatchStorageService implements vscode.Disposable {
    * Validate integrity of storage
    */
   async validateIntegrity(): Promise<IntegrityReport> {
-    this.log('[MATCH] Validating storage integrity...');
+    this.log("[MATCH] Validating storage integrity...");
 
     const report: IntegrityReport = {
       totalFiles: 0,
@@ -492,20 +568,22 @@ export class MatchStorageService implements vscode.Disposable {
       corruptedFiles: [],
       missingFromIndex: [],
       orphanedInIndex: [],
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
     };
 
     try {
       // Get all files
       const files = await fs.readdir(this.matchesDirectory);
-      const jsonFiles = files.filter(f => f.endsWith('.json') && !f.startsWith('.'));
+      const jsonFiles = files.filter(
+        (f) => f.endsWith(".json") && !f.startsWith("."),
+      );
       report.totalFiles = jsonFiles.length;
 
       // Check each file
       for (const filename of jsonFiles) {
         try {
           const filepath = path.join(this.matchesDirectory, filename);
-          const content = await fs.readFile(filepath, 'utf8');
+          const content = await fs.readFile(filepath, "utf8");
           const matchData = JSON.parse(content) as MatchPayload;
 
           // Validate
@@ -520,7 +598,6 @@ export class MatchStorageService implements vscode.Disposable {
           } else {
             report.corruptedFiles.push(filename);
           }
-
         } catch (error) {
           report.corruptedFiles.push(filename);
         }
@@ -534,8 +611,9 @@ export class MatchStorageService implements vscode.Disposable {
         }
       }
 
-      this.log(`[MATCH] Integrity check: ${report.validFiles}/${report.totalFiles} valid, ${report.corruptedFiles.length} corrupted, ${report.missingFromIndex.length} missing from index`);
-
+      this.log(
+        `[MATCH] Integrity check: ${report.validFiles}/${report.totalFiles} valid, ${report.corruptedFiles.length} corrupted, ${report.missingFromIndex.length} missing from index`,
+      );
     } catch (error) {
       this.log(`[MATCH] Integrity check failed: ${(error as Error).message}`);
     }
@@ -549,7 +627,7 @@ export class MatchStorageService implements vscode.Disposable {
   async exportIndex(filepath: string): Promise<void> {
     const data = this.indexManager.export();
     const json = JSON.stringify(data, null, 2);
-    await fs.writeFile(filepath, json, 'utf8');
+    await fs.writeFile(filepath, json, "utf8");
     this.log(`[MATCH] Index exported to ${filepath}`);
   }
 
@@ -567,7 +645,7 @@ export class MatchStorageService implements vscode.Disposable {
     const { result, order, match_id } = matchData;
 
     // Sanitize match_id to ensure filesystem safety
-    const safeMatchId = match_id.replace(/[^a-zA-Z0-9_-]/g, '_');
+    const safeMatchId = match_id.replace(/[^a-zA-Z0-9_-]/g, "_");
 
     // Format: <RESULT>_<ORDER>_<MATCH_ID>.json
     return `${result}_${order}_${safeMatchId}.json`;
@@ -576,18 +654,21 @@ export class MatchStorageService implements vscode.Disposable {
   /**
    * Atomic write using temp file + rename
    */
-  private async atomicWrite(filepath: string, data: MatchPayload): Promise<WriteResult> {
+  private async atomicWrite(
+    filepath: string,
+    data: MatchPayload,
+  ): Promise<WriteResult> {
     const tempPath = `${filepath}.tmp`;
 
     try {
       // Write to temporary file
       const jsonContent = JSON.stringify(data, null, 2);
-      await fs.writeFile(tempPath, jsonContent, 'utf8');
+      await fs.writeFile(tempPath, jsonContent, "utf8");
 
       // Verify write succeeded
       const stats = await fs.stat(tempPath);
       if (stats.size === 0) {
-        throw new Error('Temporary file is empty');
+        throw new Error("Temporary file is empty");
       }
 
       // Atomic rename
@@ -595,18 +676,17 @@ export class MatchStorageService implements vscode.Disposable {
 
       return {
         success: true,
-        bytesWritten: stats.size
+        bytesWritten: stats.size,
       };
-
     } catch (error) {
       // Cleanup temp file if it exists
       try {
         await fs.unlink(tempPath);
-      } catch { }
+      } catch {}
 
       return {
         success: false,
-        error: (error as Error).message
+        error: (error as Error).message,
       };
     }
   }
@@ -617,23 +697,30 @@ export class MatchStorageService implements vscode.Disposable {
   private async createMatchRecord(
     matchData: MatchPayload,
     filename: string,
-    filepath: string
+    filepath: string,
   ): Promise<MatchRecord> {
     const stats = await fs.stat(filepath);
 
+    // Create a unique key that includes category for proper indexing
+    const category = matchData.category || "";
+    const indexKey = category
+      ? `${category}:${matchData.match_id}`
+      : matchData.match_id;
+
     return {
-      matchId: matchData.match_id,
+      matchId: indexKey,
       filename,
       filepath,
       result: matchData.result,
       order: matchData.order,
       arena: matchData.arena || false,
+      category: category || undefined,
       opponent: matchData.opponent,
       league: matchData.league,
       durationMs: matchData.durationMs,
       timestamp: matchData.timestamp,
       storedAt: new Date(stats.mtime).toISOString(),
-      fileSize: stats.size
+      fileSize: stats.size,
     };
   }
 
@@ -642,13 +729,16 @@ export class MatchStorageService implements vscode.Disposable {
    */
   private getRotationPolicy(): RotationPolicy {
     return {
-      enabled: this.configService.get<boolean>('matches.rotation.enabled', false),
-      maxMatches: this.configService.get<number>('matches.rotation.maxMatches'),
-      maxAgeDays: this.configService.get<number>('matches.rotation.maxAgeDays'),
-      strategy: this.configService.get<'oldest' | 'by_result' | 'keep_wins'>(
-        'matches.rotation.strategy',
-        'oldest'
-      )
+      enabled: this.configService.get<boolean>(
+        "matches.rotation.enabled",
+        false,
+      ),
+      maxMatches: this.configService.get<number>("matches.rotation.maxMatches"),
+      maxAgeDays: this.configService.get<number>("matches.rotation.maxAgeDays"),
+      strategy: this.configService.get<"oldest" | "by_result" | "keep_wins">(
+        "matches.rotation.strategy",
+        "oldest",
+      ),
     };
   }
 
@@ -703,12 +793,12 @@ export class MatchStorageService implements vscode.Disposable {
       payload,
       timestamp: new Date().toISOString(),
       attempts: 1,
-      lastError: error
+      lastError: error,
     };
 
     // Check if this payload already exists (update attempts)
     const existingIndex = this.failedPayloads.findIndex(
-      fp => fp.payload.deliveryId === payload.deliveryId
+      (fp) => fp.payload.deliveryId === payload.deliveryId,
     );
 
     if (existingIndex >= 0) {
@@ -725,7 +815,9 @@ export class MatchStorageService implements vscode.Disposable {
     }
 
     this.updateFailedMatchesContext();
-    this.log(`[MATCH] Failed payload tracked: deliveryId=${payload.deliveryId}, attempts=${failedPayload.attempts}`);
+    this.log(
+      `[MATCH] Failed payload tracked: deliveryId=${payload.deliveryId}, attempts=${failedPayload.attempts}`,
+    );
   }
 
   /**
@@ -741,7 +833,7 @@ export class MatchStorageService implements vscode.Disposable {
   clearFailedPayload(deliveryId: string): void {
     const before = this.failedPayloads.length;
     this.failedPayloads = this.failedPayloads.filter(
-      fp => fp.payload.deliveryId !== deliveryId
+      (fp) => fp.payload.deliveryId !== deliveryId,
     );
     const after = this.failedPayloads.length;
 
@@ -766,9 +858,9 @@ export class MatchStorageService implements vscode.Disposable {
    */
   private updateFailedMatchesContext(): void {
     vscode.commands.executeCommand(
-      'setContext',
-      'codingame.hasFailedMatches',
-      this.failedPayloads.length > 0
+      "setContext",
+      "codingame.hasFailedMatches",
+      this.failedPayloads.length > 0,
     );
   }
 
@@ -785,7 +877,7 @@ export class MatchStorageService implements vscode.Disposable {
   async clearAllMatches(): Promise<number> {
     try {
       const files = await fs.readdir(this.matchesDirectory);
-      const jsonFiles = files.filter(f => f.endsWith('.json'));
+      const jsonFiles = files.filter((f) => f.endsWith(".json"));
 
       let deletedCount = 0;
       for (const file of jsonFiles) {
@@ -794,7 +886,9 @@ export class MatchStorageService implements vscode.Disposable {
           await fs.unlink(filePath);
           deletedCount++;
         } catch (error) {
-          this.log(`[MATCH] Failed to delete ${file}: ${(error as Error).message}`);
+          this.log(
+            `[MATCH] Failed to delete ${file}: ${(error as Error).message}`,
+          );
         }
       }
 
@@ -810,7 +904,7 @@ export class MatchStorageService implements vscode.Disposable {
   }
 
   dispose(): void {
-    this.disposables.forEach(d => d.dispose());
+    this.disposables.forEach((d) => d.dispose());
     this.indexManager.clear();
     this.failedPayloads = [];
   }

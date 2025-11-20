@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "CodinGame Sync Bridge",
   "description": "Bridges CodinGame in-browser editor with the local VS Code environment.",
-  "version": "0.1.5",
+  "version": "0.1.9",
   "action": {
     "default_title": "CodinGame Sync Bridge",
     "default_popup": "popup.html"
