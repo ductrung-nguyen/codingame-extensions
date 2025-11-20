@@ -716,6 +716,47 @@ function normalizeMatchPayload(
       `[BATTLE] Player scores: [${data.scores[playerIndex]}] vs [${data.scores[opponentIndex]}]`,
     );
 
+    // Extract opponent name from agents array
+    let opponentName = "unknown";
+    if (
+      data.agents &&
+      Array.isArray(data.agents) &&
+      data.agents[opponentIndex]
+    ) {
+      const opponentAgent = data.agents[opponentIndex];
+      console.log("[BATTLE] Opponent agent data:", opponentAgent);
+
+      if (opponentAgent.codingamer) {
+        opponentName =
+          opponentAgent.codingamer.pseudo ||
+          opponentAgent.codingamer.nickname ||
+          opponentAgent.codingamer.publicHandle ||
+          opponentAgent.codingamer.userId?.toString() ||
+          "unknown";
+        console.log(
+          "[BATTLE] Extracted opponent name from codingamer:",
+          opponentName,
+        );
+      } else if (opponentAgent.nickname) {
+        opponentName = opponentAgent.nickname;
+        console.log(
+          "[BATTLE] Extracted opponent name from nickname:",
+          opponentName,
+        );
+      } else if (opponentAgent.pseudo) {
+        opponentName = opponentAgent.pseudo;
+        console.log(
+          "[BATTLE] Extracted opponent name from pseudo:",
+          opponentName,
+        );
+      } else if (opponentAgent.agentId !== undefined) {
+        opponentName = `Agent ${opponentAgent.agentId}`;
+        console.log("[BATTLE] Using agent ID as opponent name:", opponentName);
+      }
+    } else {
+      console.log("[BATTLE] No agents array found or opponent agent missing");
+    }
+
     const timestamp = new Date().toISOString();
 
     console.log(
@@ -732,7 +773,7 @@ function normalizeMatchPayload(
       category: category,
       metadata: {
         arena: Boolean(data?.arena ?? false),
-        opponent: data?.opponent ?? "unknown",
+        opponent: opponentName,
         league: data?.league ?? "",
         language: data?.language ?? "",
         duration_ms: data?.duration_ms ?? null,

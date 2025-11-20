@@ -165,41 +165,32 @@
     console.log(
       "[CodinGame Content Script] Received battle list from page script",
     );
-    const { battles } = event.detail;
+    const { battles, teamName } = event.detail;
     if (battles && battles.length > 0) {
       availableBattles = battles;
       console.log(
         `[CodinGame Content Script] Stored ${battles.length} battles from leaderboard`,
       );
 
-      // Extract team name from first battle if available
-      if (battles[0]) {
-        const firstBattle = battles[0];
-        // Try to extract team/player name from battle data
-        let teamName = null;
+      // Use team name from the API response (most reliable source)
+      if (teamName) {
+        console.log(
+          `[CodinGame Content Script] Auto-detected team name from API: "${teamName}"`,
+        );
+        setDefaultCategory(teamName, true); // Force update from API
+      } else {
+        console.log(
+          "[CodinGame Content Script] No team name in API response, trying DOM extraction...",
+        );
 
-        // Check various possible fields in the battle object
-        if (firstBattle.agent?.pseudo) {
-          teamName = firstBattle.agent.pseudo;
-        } else if (firstBattle.agent?.nickname) {
-          teamName = firstBattle.agent.nickname;
-        } else if (firstBattle.player?.pseudo) {
-          teamName = firstBattle.player.pseudo;
-        } else if (firstBattle.player?.nickname) {
-          teamName = firstBattle.player.nickname;
-        } else if (firstBattle.codingamer?.pseudo) {
-          teamName = firstBattle.codingamer.pseudo;
-        } else if (firstBattle.codingamer?.nickname) {
-          teamName = firstBattle.codingamer.nickname;
-        }
-
-        // If not found in battle data, try to extract from DOM
-        if (!teamName) {
-          teamName = extractTeamName();
-        }
-
-        if (teamName) {
-          setDefaultCategory(teamName);
+        // Fallback: try to extract from DOM
+        const domTeamName = extractTeamName();
+        if (domTeamName) {
+          console.log(
+            `[CodinGame Content Script] Extracted team name from DOM: "${domTeamName}"`,
+          );
+          currentTeamName = domTeamName;
+          setDefaultCategory(domTeamName);
         }
       }
 
@@ -1376,23 +1367,42 @@
       .replace(/^-|-$/g, "");
   }
 
-  function setDefaultCategory(teamName) {
+  function setDefaultCategory(teamName, forceUpdate = false) {
     if (!teamName) return;
 
-    currentTeamName = teamName;
     const sanitized = sanitizeCategory(teamName);
+    const previousTeamName = currentTeamName;
+    currentTeamName = teamName;
 
-    // Only set if user hasn't customized it yet
-    if (
+    // Update if:
+    // 1. No category is set yet, OR
+    // 2. Force update (from API), OR
+    // 3. Category matches the previous team name (user hasn't manually changed it)
+    const shouldUpdate =
       !captureCategory ||
-      captureCategory === sanitizeCategory(currentTeamName)
-    ) {
+      forceUpdate ||
+      captureCategory === sanitizeCategory(previousTeamName);
+
+    if (shouldUpdate) {
       captureCategory = sanitized;
 
       // Update input field if it exists
       if (categoryInput) {
         categoryInput.value = captureCategory;
+        // Provide visual feedback that category was auto-set
+        categoryInput.style.borderColor = "#10b981";
+        categoryInput.style.background = "#f0fdf4";
+        setTimeout(() => {
+          categoryInput.style.borderColor = "#e2e8f0";
+          categoryInput.style.background = "white";
+        }, 2000);
       }
+
+      // Show status message
+      updateCaptureStatus(
+        `📋 Category auto-set to: ${captureCategory}`,
+        "success",
+      );
 
       console.log(
         "[CodinGame Content Script] Auto-set category:",
@@ -1403,21 +1413,63 @@
 
   function extractTeamName() {
     // Try to extract team name from the page when viewing last battles
+
+    // Strategy 1: Find the team name from a clicked/visible last battles panel
+    // Look for all .last-battles buttons and find which one's parent row might be active
+    const lastBattlesButtons = document.querySelectorAll(
+      '.last-battles, a[href*="last-battle"]',
+    );
+
+    for (const button of lastBattlesButtons) {
+      // Get the parent table row
+      const row = button.closest("tr");
+      if (row) {
+        // Find the pseudo link in the same row (but exclude rank numbers)
+        const links = row.querySelectorAll("a.pseudo");
+        for (const link of links) {
+          const text = link.textContent.trim();
+          // Make sure it's not just a number (rank)
+          if (text && !text.match(/^\d+$/)) {
+            console.log(
+              `[CodinGame Content Script] Extracted team name "${text}" from .pseudo link in leaderboard row`,
+            );
+            return text;
+          }
+        }
+      }
+    }
+
+    // Strategy 2: Try standard selectors for selected/active rows
     const selectors = [
+      "tr.selected a.pseudo",
+      "tr.active a.pseudo",
       ".leaderboard-row.selected .pseudo",
       ".leaderboard-item.selected .team-name",
       ".leaderboard-item.selected .player-name",
       '[class*="selected"] .pseudo',
-      ".cg-last-battles-header .team-name",
     ];
 
     for (const selector of selectors) {
       const element = document.querySelector(selector);
       if (element && element.textContent.trim()) {
-        return element.textContent.trim();
+        const teamName = element.textContent.trim();
+        // Exclude if it's just a number or common UI text
+        if (
+          !teamName.match(/^\d+$/) &&
+          !teamName.toLowerCase().includes("last battle") &&
+          !teamName.toLowerCase().includes("view last")
+        ) {
+          console.log(
+            `[CodinGame Content Script] Extracted team name "${teamName}" from selector: ${selector}`,
+          );
+          return teamName;
+        }
       }
     }
 
+    console.log(
+      "[CodinGame Content Script] Could not extract team name from page",
+    );
     return "";
   }
 
@@ -1521,6 +1573,12 @@
 
     captureButton.onclick = async () => {
       if (captureInProgress) return;
+
+      // If monitoring is active, stop it
+      if (continuousMonitoring) {
+        stopContinuousMonitoring();
+        return;
+      }
 
       // Extract team name if not already set
       if (!currentTeamName) {
@@ -1633,14 +1691,18 @@
     // Reset pause state
     capturePaused = false;
 
-    // Extract and set default category from team name if available
+    // Team name should already be set by the __cgBattleListCaptured event handler
+    // which receives the correct team name from the API
+    // Only use DOM extraction as a last resort fallback
     if (!currentTeamName) {
-      currentTeamName = extractTeamName();
-    }
-
-    // Auto-set category from team name if not already set
-    if (currentTeamName) {
-      setDefaultCategory(currentTeamName);
+      const extractedTeamName = extractTeamName();
+      if (extractedTeamName) {
+        console.log(
+          `[CodinGame Content Script] Fallback: extracted team name from DOM: "${extractedTeamName}"`,
+        );
+        currentTeamName = extractedTeamName;
+        setDefaultCategory(currentTeamName);
+      }
     }
 
     try {
@@ -1746,6 +1808,11 @@
           `All ${battles.length} battles captured`,
           "success",
         );
+
+        // If we were monitoring, keep the monitoring button state
+        if (continuousMonitoring) {
+          updateBatchCaptureButton("🔄 Monitoring... (click to stop)", false);
+        }
         return;
       }
 
@@ -1814,7 +1881,9 @@
         startContinuousMonitoring();
       } else {
         updateBatchCaptureButton(
-          continuousMonitoring ? "🔄 Monitoring..." : "📊 Capture All Battles",
+          continuousMonitoring
+            ? "🔄 Monitoring... (click to stop)"
+            : "📊 Capture",
           false,
         );
       }
@@ -1827,9 +1896,12 @@
       const errorMsg = error.message || "Unknown error occurred";
       showStatus(`Error: ${errorMsg}`, "error");
       updateBatchCaptureButton(
-        continuousMonitoring ? "🔄 Monitoring..." : "📊 Capture All Battles",
+        continuousMonitoring
+          ? "🔄 Monitoring... (click to stop)"
+          : "📊 Capture",
         false,
       );
+      captureInProgress = false;
     }
   }
 
@@ -1843,7 +1915,7 @@
       "[CodinGame Content Script] Starting continuous battle monitoring...",
     );
     continuousMonitoring = true;
-    updateBatchCaptureButton("🔄 Monitoring...", false);
+    updateBatchCaptureButton("🔄 Monitoring... (click to stop)", false);
     showStatus("Monitoring for new battles...", "ready");
 
     // Check for new battles every 10 seconds
@@ -1862,13 +1934,14 @@
       "[CodinGame Content Script] Stopping continuous battle monitoring...",
     );
     continuousMonitoring = false;
+    captureInProgress = false;
 
     if (monitoringInterval) {
       clearInterval(monitoringInterval);
       monitoringInterval = null;
     }
 
-    updateBatchCaptureButton("📊 Capture All Battles", false);
+    updateBatchCaptureButton("📊 Capture", false);
     showStatus("Monitoring stopped", "ready");
   }
 
@@ -2732,6 +2805,7 @@
 
     if (isArenaPage && !capturePanel) {
       createBatchCaptureButton();
+      setupLastBattlesPanelDetection();
     } else if (!isArenaPage && capturePanel) {
       capturePanel.remove();
       capturePanel = null;
@@ -2739,7 +2813,41 @@
       pauseResumeButton = null;
       categoryInput = null;
       captureStatusText = null;
+      if (lastBattlesPanelObserver) {
+        lastBattlesPanelObserver.disconnect();
+        lastBattlesPanelObserver = null;
+      }
     }
+  }
+
+  function setupLastBattlesPanelDetection() {
+    // Disconnect existing observer if any
+    if (lastBattlesPanelObserver) {
+      lastBattlesPanelObserver.disconnect();
+    }
+
+    // Observe DOM for last battles panel appearing or battles being loaded
+    lastBattlesPanelObserver = new MutationObserver(() => {
+      // Check if we have available battles (set by page script)
+      // Note: Team name extraction is now handled by the API response in __cgBattleListCaptured event
+      // The DOM extraction was causing issues by overwriting the correct API-extracted team name
+      // So we no longer call extractTeamName() here
+      if (availableBattles && availableBattles.length > 0) {
+        console.log(
+          `[CodinGame Content Script] Battles loaded (${availableBattles.length} available)`,
+        );
+        // Team name should already be set by the __cgBattleListCaptured event handler
+        // which receives the correct team name from the API
+      }
+    });
+
+    // Observe the entire document for changes
+    lastBattlesPanelObserver.observe(document.body, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ["class", "style"],
+    });
   }
 
   // Check on load and on navigation

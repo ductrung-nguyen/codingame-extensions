@@ -545,9 +545,63 @@
                   battles.length,
                   "battles",
                 );
+
+                // Extract team name by finding the common player across all battles
+                let teamName = null;
+                if (battles && battles.length > 0) {
+                  // Count occurrences of each playerAgentId across all battles
+                  const agentCounts = new Map();
+                  const agentToPlayer = new Map();
+
+                  for (const battle of battles) {
+                    if (battle.players && Array.isArray(battle.players)) {
+                      for (const player of battle.players) {
+                        if (player.playerAgentId) {
+                          const agentId = player.playerAgentId;
+                          agentCounts.set(
+                            agentId,
+                            (agentCounts.get(agentId) || 0) + 1,
+                          );
+                          if (!agentToPlayer.has(agentId)) {
+                            agentToPlayer.set(agentId, player);
+                          }
+                        }
+                      }
+                    }
+                  }
+
+                  // The team is the agent that appears in the most battles
+                  let maxCount = 0;
+                  let teamAgentId = null;
+                  for (const [agentId, count] of agentCounts.entries()) {
+                    if (count > maxCount) {
+                      maxCount = count;
+                      teamAgentId = agentId;
+                    }
+                  }
+
+                  if (teamAgentId && agentToPlayer.has(teamAgentId)) {
+                    const teamPlayer = agentToPlayer.get(teamAgentId);
+                    teamName = teamPlayer.nickname || teamPlayer.pseudo || null;
+                    if (teamName) {
+                      console.log(
+                        "[CodinGame Page Context] Extracted team name from battle list:",
+                        teamName,
+                        "(agentId:",
+                        teamAgentId,
+                        "appears in",
+                        maxCount,
+                        "of",
+                        battles.length,
+                        "battles)",
+                      );
+                    }
+                  }
+                }
+
                 // Notify content script about available battles
                 const event = new CustomEvent("__cgBattleListCaptured", {
-                  detail: { battles },
+                  detail: { battles, teamName },
                 });
                 window.dispatchEvent(event);
                 console.log(
