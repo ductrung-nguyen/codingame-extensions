@@ -1,0 +1,360 @@
+{
+  "name": "codingame-vscode-extension",
+  "displayName": "CodinGame Sync Bridge",
+  "description": "Synchronize local CodinGame bot code with the browser and visualize match telemetry",
+  "version": "0.1.1",
+  "publisher": "codingame",
+  "repository": {
+    "url": "https://github.com/",
+    "type": "git"
+  },
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "codingame",
+          "title": "CodinGame",
+          "icon": "$(graph)"
+        }
+      ]
+    },
+    "views": {
+      "codingame": [
+        {
+          "type": "webview",
+          "id": "codingameBridgeStatus",
+          "name": "Bridge Status",
+          "contextualTitle": "CodinGame Bridge Status"
+        },
+        {
+          "type": "webview",
+          "id": "codingameStatistics",
+          "name": "Statistics",
+          "contextualTitle": "CodinGame Statistics"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "codingame.sync",
+        "title": "CodinGame: Sync Code to Browser"
+      },
+      {
+        "command": "codingame.toggleStripComments",
+        "title": "CodinGame: Toggle Strip Comments"
+      },
+      {
+        "command": "codingame.resendLast",
+        "title": "CodinGame: Resend Last Code Snapshot"
+      },
+      {
+        "command": "codingame.resendLastSnapshot",
+        "title": "CodinGame: Resend Last Snapshot (Enhanced)",
+        "icon": "$(debug-restart)"
+      },
+      {
+        "command": "codingame.showStatistics",
+        "title": "CodinGame: Show Statistics",
+        "icon": "$(graph)"
+      },
+      {
+        "command": "codingame.refreshStatistics",
+        "title": "CodinGame: Refresh Statistics",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "codingame.exportStatistics",
+        "title": "CodinGame: Export Statistics to CSV"
+      },
+      {
+        "command": "codingame.retryFailedMatches",
+        "title": "CodinGame: Retry Failed Matches",
+        "icon": "$(sync)"
+      },
+      {
+        "command": "codingame.generateDiagnosticReport",
+        "title": "CodinGame: Generate Diagnostic Report",
+        "icon": "$(report)"
+      },
+      {
+        "command": "codingame.clearCache",
+        "title": "CodinGame: Clear Cache",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "codingame.openLogs",
+        "title": "CodinGame: Open Logs"
+      },
+      {
+        "command": "codingame.showBridgeStatus",
+        "title": "CodinGame: Show Bridge Status",
+        "icon": "$(pulse)"
+      },
+      {
+        "command": "codingame.refreshBridgeStatusView",
+        "title": "CodinGame: Refresh Bridge Status View (Force)",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "codingame.exportBridgeLogs",
+        "title": "CodinGame: Export Bridge Logs"
+      },
+      {
+        "command": "codingame.configureStorageDir",
+        "title": "CodinGame: Configure Storage Directory"
+      },
+      {
+        "command": "codingame.testCommentStripping",
+        "title": "CodinGame: Test Comment Stripping (Demo)"
+      },
+      {
+        "command": "codingame.rebuildIndex",
+        "title": "CodinGame: Rebuild Match Index"
+      },
+      {
+        "command": "codingame.reprocessMatches",
+        "title": "CodinGame: Reprocess Matches"
+      },
+      {
+        "command": "codingame.clearMatches",
+        "title": "CodinGame: Clear All Matches"
+      },
+      {
+        "command": "codingame.showMatchFile",
+        "title": "CodinGame: Show Match File"
+      },
+      {
+        "command": "codingame.validateMatchIntegrity",
+        "title": "CodinGame: Validate Match Integrity"
+      },
+      {
+        "command": "codingame.applyRotation",
+        "title": "CodinGame: Apply Rotation Policy"
+      },
+      {
+        "command": "codingame.exportMatchIndex",
+        "title": "CodinGame: Export Match Index"
+      },
+      {
+        "command": "codingame.showMatchStats",
+        "title": "CodinGame: Show Match Statistics"
+      },
+      {
+        "command": "codingame.deleteMatch",
+        "title": "CodinGame: Delete Match"
+      }
+    ],
+    "configuration": {
+      "title": "CodinGame",
+      "properties": {
+        "codingame.sync.stripComments": {
+          "type": "boolean",
+          "default": false,
+          "description": "Strip comments from code before syncing to browser"
+        },
+        "codingame.sync.commentStrategy": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "regex",
+            "none"
+          ],
+          "default": "auto",
+          "description": "Strategy for comment stripping: auto (AST-based with regex fallback), regex (regex only), none (disable)"
+        },
+        "codingame.sync.targetFile": {
+          "type": "string",
+          "default": "",
+          "description": "Path to file to sync (empty = active editor)"
+        },
+        "codingame.matches.directory": {
+          "type": "string",
+          "default": ".codingame/matches",
+          "description": "Directory to store match data (relative to workspace root)"
+        },
+        "codingame.matches.maxFiles": {
+          "type": "number",
+          "default": 1000,
+          "description": "Maximum number of match files to keep (0 = unlimited)"
+        },
+        "codingame.matches.rotation.enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable automatic cleanup of old matches"
+        },
+        "codingame.matches.rotation.maxMatches": {
+          "type": "number",
+          "default": 1000,
+          "description": "Maximum number of matches to keep (older matches deleted)"
+        },
+        "codingame.matches.rotation.maxAgeDays": {
+          "type": "number",
+          "default": 30,
+          "description": "Delete matches older than this many days (0 = disabled)"
+        },
+        "codingame.matches.rotation.strategy": {
+          "type": "string",
+          "enum": [
+            "oldest",
+            "by_result",
+            "keep_wins"
+          ],
+          "default": "oldest",
+          "description": "Deletion strategy: oldest (by date), by_result (prefer keeping wins), keep_wins (delete losses/draws only)"
+        },
+        "codingame.matches.autoReindex": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically rebuild match index on extension activation"
+        },
+        "codingame.bridge.port": {
+          "type": "number",
+          "default": 45123,
+          "description": "WebSocket port for communication with Chrome extension"
+        },
+        "codingame.bridge.host": {
+          "type": "string",
+          "default": "127.0.0.1",
+          "description": "WebSocket host (should remain localhost for security)"
+        },
+        "codingame.bridge.autoStart": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically start bridge server on extension activation"
+        },
+        "codingame.bridge.heartbeatInterval": {
+          "type": "number",
+          "default": 10000,
+          "description": "Heartbeat interval in milliseconds"
+        },
+        "codingame.bridge.heartbeatTimeout": {
+          "type": "number",
+          "default": 30000,
+          "description": "Heartbeat timeout in milliseconds (triggers reconnect)"
+        },
+        "codingame.bridge.maxQueueSize": {
+          "type": "number",
+          "default": 100,
+          "description": "Maximum number of messages to queue during disconnection"
+        },
+        "codingame.logging.level": {
+          "type": "string",
+          "enum": [
+            "debug",
+            "info",
+            "warn",
+            "error"
+          ],
+          "default": "info",
+          "description": "Minimum log level to display"
+        },
+        "codingame.logging.ringBufferSize": {
+          "type": "number",
+          "default": 200,
+          "description": "Number of log entries to keep in memory"
+        },
+        "codingame.logging.verbose": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable verbose logging for debugging"
+        },
+        "codingame.statistics.defaultTimeRange": {
+          "type": "string",
+          "enum": [
+            "24h",
+            "7d",
+            "30d",
+            "all"
+          ],
+          "default": "7d",
+          "description": "Default time range for statistics view"
+        },
+        "codingame.statistics.refreshInterval": {
+          "type": "number",
+          "default": 30,
+          "minimum": 5,
+          "description": "Auto-refresh interval in seconds (0 to disable)"
+        },
+        "codingame.statistics.maxLogPreview": {
+          "type": "number",
+          "default": 10240,
+          "description": "Maximum bytes of stdout/stderr to display in detail view"
+        },
+        "codingame.diagnostics.autoReportErrors": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically generate diagnostic report on critical errors"
+        },
+        "codingame.diagnostics.maxRecoveryHistory": {
+          "type": "number",
+          "default": 50,
+          "minimum": 10,
+          "maximum": 200,
+          "description": "Maximum number of recovery events to keep in history"
+        },
+        "codingame.diagnostics.confirmDestructive": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show confirmation dialog before destructive operations (cache clear, etc.)"
+        },
+        "codingame.recovery.maxRetryAttempts": {
+          "type": "number",
+          "default": 3,
+          "minimum": 1,
+          "maximum": 10,
+          "description": "Maximum number of automatic retry attempts for failed matches"
+        }
+      }
+    },
+    "menus": {
+      "view/title": [
+        {
+          "command": "codingame.refreshStatistics",
+          "when": "view == codingameStatistics",
+          "group": "navigation"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "codingame.retryFailedMatches",
+          "when": "codingame.hasFailedMatches"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile",
+    "test": "node ./out/test/runTest.js",
+    "lint": "eslint src --ext ts"
+  },
+  "devDependencies": {
+    "@types/glob": "^8.1.0",
+    "@types/mocha": "^10.0.1",
+    "@types/node": "^20.5.0",
+    "@types/vscode": "^1.80.0",
+    "@types/ws": "^8.5.5",
+    "@typescript-eslint/eslint-plugin": "^6.4.0",
+    "@typescript-eslint/parser": "^6.4.0",
+    "@vscode/test-electron": "^2.3.4",
+    "eslint": "^8.47.0",
+    "glob": "^10.3.3",
+    "mocha": "^10.2.0",
+    "typescript": "^5.1.6"
+  },
+  "dependencies": {
+    "ws": "^8.14.0"
+  }
+}

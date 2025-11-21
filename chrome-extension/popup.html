@@ -1,0 +1,527 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>CodinGame Sync Bridge</title>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        margin: 0;
+        padding: 0;
+        width: 380px;
+        min-height: 400px;
+        color: #1e293b;
+        background-color: #f1f5f9;
+        font-size: 14px;
+      }
+
+      .header {
+        background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+        color: white;
+        padding: 16px;
+        box-shadow: 0 2px 8px rgba(37, 99, 235, 0.2);
+      }
+
+      .header h1 {
+        margin: 0 0 4px 0;
+        font-size: 18px;
+        font-weight: 600;
+      }
+
+      .header .subtitle {
+        margin: 0;
+        font-size: 12px;
+        opacity: 0.9;
+      }
+
+      .container {
+        padding: 12px;
+      }
+
+      .card {
+        background: white;
+        border-radius: 8px;
+        padding: 14px;
+        margin-bottom: 10px;
+        box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
+        border: 1px solid #e2e8f0;
+      }
+
+      .card-title {
+        font-size: 13px;
+        font-weight: 600;
+        color: #475569;
+        margin: 0 0 10px 0;
+        text-transform: uppercase;
+        letter-spacing: 0.025em;
+      }
+
+      .status-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 6px 0;
+        border-bottom: 1px solid #f1f5f9;
+      }
+
+      .status-row:last-child {
+        border-bottom: none;
+        padding-bottom: 0;
+      }
+
+      .status-row:first-child {
+        padding-top: 0;
+      }
+
+      .status-label {
+        font-size: 13px;
+        color: #64748b;
+        font-weight: 500;
+      }
+
+      .status-value {
+        font-size: 13px;
+        font-family: 'SF Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        color: #0f172a;
+        font-weight: 500;
+        max-width: 200px;
+        text-align: right;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .connection-header {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding-bottom: 10px;
+        border-bottom: 2px solid #f1f5f9;
+        margin-bottom: 10px;
+      }
+
+      .indicator {
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        flex-shrink: 0;
+        position: relative;
+      }
+
+      .indicator.online {
+        background: #22c55e;
+        box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.2);
+      }
+
+      .indicator.online::after {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        border-radius: 50%;
+        background: #22c55e;
+        animation: pulse 2s ease-in-out infinite;
+      }
+
+      .indicator.offline {
+        background: #ef4444;
+        box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.2);
+      }
+
+      .indicator.retrying {
+        background: #f59e0b;
+        box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.2);
+      }
+
+      @keyframes pulse {
+        0%, 100% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0;
+        }
+      }
+
+      .connection-text {
+        flex: 1;
+      }
+
+      .connection-status {
+        font-size: 15px;
+        font-weight: 600;
+        margin: 0;
+      }
+
+      .connection-detail {
+        font-size: 12px;
+        color: #64748b;
+        margin: 2px 0 0 0;
+      }
+
+      .badge {
+        display: inline-block;
+        padding: 3px 8px;
+        border-radius: 12px;
+        font-size: 11px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.025em;
+      }
+
+      .badge.success {
+        background: #dcfce7;
+        color: #166534;
+      }
+
+      .badge.error {
+        background: #fee2e2;
+        color: #991b1b;
+      }
+
+      .badge.warning {
+        background: #fef3c7;
+        color: #92400e;
+      }
+
+      .badge.info {
+        background: #dbeafe;
+        color: #1e40af;
+      }
+
+      button {
+        width: 100%;
+        border: none;
+        border-radius: 6px;
+        padding: 10px 14px;
+        font-size: 13px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.15s ease;
+        font-family: inherit;
+      }
+
+      button:not(:last-child) {
+        margin-bottom: 8px;
+      }
+
+      button.primary {
+        background: #3b82f6;
+        color: white;
+      }
+
+      button.primary:hover:not(:disabled) {
+        background: #2563eb;
+        transform: translateY(-1px);
+        box-shadow: 0 4px 8px rgba(37, 99, 235, 0.3);
+      }
+
+      button.secondary {
+        background: #f1f5f9;
+        color: #475569;
+        border: 1px solid #e2e8f0;
+      }
+
+      button.secondary:hover:not(:disabled) {
+        background: #e2e8f0;
+      }
+
+      button.danger {
+        background: #fef2f2;
+        color: #dc2626;
+        border: 1px solid #fecaca;
+      }
+
+      button.danger:hover:not(:disabled) {
+        background: #fee2e2;
+      }
+
+      button:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+
+      .logs-container {
+        max-height: 200px;
+        overflow-y: auto;
+        background: #f8fafc;
+        border-radius: 6px;
+        padding: 8px;
+        font-size: 11px;
+        font-family: 'SF Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+      }
+
+      .log-entry {
+        padding: 4px 6px;
+        border-left: 3px solid transparent;
+        margin-bottom: 4px;
+        border-radius: 3px;
+        background: white;
+      }
+
+      .log-entry.info {
+        border-left-color: #3b82f6;
+      }
+
+      .log-entry.warn {
+        border-left-color: #f59e0b;
+        background: #fffbeb;
+      }
+
+      .log-entry.error {
+        border-left-color: #ef4444;
+        background: #fef2f2;
+      }
+
+      .log-time {
+        color: #94a3b8;
+        margin-right: 6px;
+      }
+
+      .log-message {
+        color: #1e293b;
+        word-break: break-word;
+      }
+
+      .empty-state {
+        text-align: center;
+        padding: 20px;
+        color: #94a3b8;
+        font-size: 12px;
+      }
+
+      .stats-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+        margin-top: 10px;
+      }
+
+      .stat-box {
+        background: #f8fafc;
+        border-radius: 6px;
+        padding: 10px;
+        text-align: center;
+      }
+
+      .stat-value {
+        font-size: 24px;
+        font-weight: 700;
+        color: #3b82f6;
+        margin: 0;
+      }
+
+      .stat-label {
+        font-size: 11px;
+        color: #64748b;
+        margin: 4px 0 0 0;
+        text-transform: uppercase;
+        letter-spacing: 0.025em;
+      }
+
+      .tabs {
+        display: flex;
+        gap: 4px;
+        margin-bottom: 10px;
+        border-bottom: 2px solid #e2e8f0;
+      }
+
+      .tab {
+        flex: 1;
+        padding: 8px 12px;
+        background: none;
+        border: none;
+        border-bottom: 2px solid transparent;
+        color: #64748b;
+        font-size: 13px;
+        font-weight: 600;
+        cursor: pointer;
+        margin-bottom: -2px;
+        transition: all 0.15s ease;
+      }
+
+      .tab:hover {
+        color: #3b82f6;
+      }
+
+      .tab.active {
+        color: #3b82f6;
+        border-bottom-color: #3b82f6;
+      }
+
+      .tab-content {
+        display: none;
+      }
+
+      .tab-content.active {
+        display: block;
+      }
+
+      .toast {
+        position: fixed;
+        bottom: 16px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: #1e293b;
+        color: white;
+        padding: 10px 16px;
+        border-radius: 6px;
+        font-size: 13px;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+        opacity: 0;
+        transition: opacity 0.3s ease;
+        z-index: 1000;
+        max-width: 320px;
+      }
+
+      .toast.show {
+        opacity: 1;
+      }
+
+      .loading {
+        display: inline-block;
+        width: 12px;
+        height: 12px;
+        border: 2px solid #e2e8f0;
+        border-top-color: #3b82f6;
+        border-radius: 50%;
+        animation: spin 0.6s linear infinite;
+      }
+
+      @keyframes spin {
+        to { transform: rotate(360deg); }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="header">
+      <h1>CodinGame Sync Bridge</h1>
+      <p class="subtitle">Real-time code sync & match capture</p>
+    </div>
+
+    <div class="container">
+      <!-- Setup Wizard (shown when no token configured) -->
+      <div class="card" id="setup-wizard" style="display: none;">
+        <div style="text-align: center; padding: 10px 0;">
+          <div style="font-size: 48px; margin-bottom: 10px;">🔑</div>
+          <h2 style="margin: 0 0 8px 0; font-size: 16px; color: #1e293b;">Setup Required</h2>
+          <p style="margin: 0 0 16px 0; font-size: 13px; color: #64748b;">
+            Configure your authentication token to connect
+          </p>
+        </div>
+
+        <div style="background: #f8fafc; padding: 12px; border-radius: 6px; margin-bottom: 12px;">
+          <p style="margin: 0 0 8px 0; font-size: 12px; font-weight: 600; color: #475569;">
+            📋 How to get your token:
+          </p>
+          <ol style="margin: 0; padding-left: 20px; font-size: 12px; color: #64748b;">
+            <li style="margin-bottom: 6px;">Open VS Code with CodinGame extension</li>
+            <li style="margin-bottom: 6px;">Click the <strong>CodinGame icon</strong> in the sidebar</li>
+            <li style="margin-bottom: 6px;">Find <strong>Bridge Status</strong> panel</li>
+            <li style="margin-bottom: 6px;">Click the <strong>"📋 Copy Full Token"</strong> button</li>
+            <li style="margin-bottom: 0;">Paste it below and click Save</li>
+          </ol>
+        </div>
+
+        <div style="margin-bottom: 12px;">
+          <label style="display: block; font-size: 12px; font-weight: 600; color: #475569; margin-bottom: 6px;">
+            Authentication Token
+          </label>
+          <input
+            type="text"
+            id="setup-token-input"
+            placeholder="Paste your 64-character token here..."
+            style="width: 100%; padding: 8px 10px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 12px; font-family: monospace;"
+          />
+          <p style="margin: 4px 0 0 0; font-size: 11px; color: #94a3b8;">
+            Token will be saved securely in Chrome storage
+          </p>
+        </div>
+
+        <button class="primary" id="setup-save-btn" style="margin-bottom: 8px;">
+          Save Token & Connect
+        </button>
+        <button class="secondary" id="setup-options-btn">
+          Open Full Options Page
+        </button>
+      </div>
+
+      <!-- Connection Status Card -->
+      <div class="card" id="status-card">
+        <div class="connection-header">
+          <span class="indicator offline" id="connection-indicator"></span>
+          <div class="connection-text">
+            <p class="connection-status" id="connection-status">Disconnected</p>
+            <p class="connection-detail" id="connection-detail">Waiting for bridge...</p>
+          </div>
+        </div>
+        <div class="status-row">
+          <span class="status-label">Last Heartbeat</span>
+          <span class="status-value" id="heartbeat-value">—</span>
+        </div>
+        <div class="status-row">
+          <span class="status-label">Last Sync</span>
+          <span class="status-value" id="sync-value">—</span>
+        </div>
+      </div>
+
+      <!-- Statistics Card -->
+      <div class="card" id="stats-card">
+        <h2 class="card-title">Statistics</h2>
+        <div class="stats-grid">
+          <div class="stat-box">
+            <p class="stat-value" id="pending-count">0</p>
+            <p class="stat-label">Pending</p>
+          </div>
+          <div class="stat-box">
+            <p class="stat-value" id="tabs-count">0</p>
+            <p class="stat-label">IDE Tabs</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tabs -->
+      <div class="tabs" id="main-tabs">
+        <button class="tab active" data-tab="actions">Actions</button>
+        <button class="tab" data-tab="logs">Logs</button>
+      </div>
+
+      <!-- Actions Tab -->
+      <div class="tab-content active" id="actions-tab">
+        <div class="card">
+          <button class="primary" id="reconnect-btn">
+            <span id="reconnect-text">Reconnect Bridge</span>
+          </button>
+          <button class="secondary" id="resend-btn" disabled>
+            Resend Pending Matches (<span id="resend-count">0</span>)
+          </button>
+          <button class="secondary" id="open-options-btn">
+            Open Settings
+          </button>
+          <button class="danger" id="clear-logs-btn">
+            Clear Logs
+          </button>
+        </div>
+      </div>
+
+      <!-- Logs Tab -->
+      <div class="tab-content" id="logs-tab">
+        <div class="card">
+          <div class="logs-container" id="logs-container">
+            <div class="empty-state">No logs available</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="toast" id="toast"></div>
+
+    <script src="popup.js"></script>
+  </body>
+</html>

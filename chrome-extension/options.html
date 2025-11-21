@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>CodinGame Sync Bridge – Options</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+          sans-serif;
+      }
+
+      body {
+        margin: 0;
+        padding: 32px;
+        background: #f4f6fb;
+        color: #0f172a;
+      }
+
+      h1 {
+        font-size: 1.5rem;
+        margin-bottom: 0.25rem;
+      }
+
+      p {
+        margin-top: 0;
+        color: #475569;
+      }
+
+      .card {
+        background: #fff;
+        border-radius: 12px;
+        padding: 24px;
+        box-shadow: 0 12px 24px rgba(15, 23, 42, 0.1);
+        max-width: 720px;
+      }
+
+      .grid {
+        display: grid;
+        gap: 16px;
+        margin-top: 24px;
+      }
+
+      .row {
+        display: flex;
+        flex-direction: column;
+      }
+
+      label {
+        font-weight: 600;
+        margin-bottom: 4px;
+      }
+
+      input,
+      select {
+        font: inherit;
+        padding: 10px 12px;
+        border-radius: 8px;
+        border: 1px solid #cbd5e5;
+      }
+
+      input:focus {
+        outline: none;
+        border-color: #3b82f6;
+        box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+      }
+
+      .hint {
+        font-size: 0.85rem;
+        color: #64748b;
+        margin-top: 4px;
+      }
+
+      .warning {
+        background: #fef3c7;
+        border: 1px solid #fbbf24;
+        color: #92400e;
+        padding: 12px 16px;
+        border-radius: 8px;
+        font-size: 0.9rem;
+        margin-top: 24px;
+      }
+
+      .warning strong {
+        display: block;
+        margin-bottom: 4px;
+      }
+
+      .info {
+        background: #dbeafe;
+        border: 1px solid #3b82f6;
+        color: #1e40af;
+        padding: 12px 16px;
+        border-radius: 8px;
+        font-size: 0.9rem;
+        margin-top: 24px;
+      }
+
+      .info strong {
+        display: block;
+        margin-bottom: 4px;
+      }
+
+      .actions {
+        margin-top: 24px;
+        display: flex;
+        gap: 12px;
+      }
+
+      button {
+        font: inherit;
+        padding: 10px 20px;
+        border-radius: 8px;
+        border: none;
+        cursor: pointer;
+        font-weight: 600;
+        transition: all 0.2s;
+      }
+
+      button.primary {
+        background: #3b82f6;
+        color: white;
+      }
+
+      button.primary:hover {
+        background: #2563eb;
+      }
+
+      button.secondary {
+        background: #e2e8f0;
+        color: #475569;
+      }
+
+      button.secondary:hover {
+        background: #cbd5e1;
+      }
+
+      .status {
+        margin-top: 12px;
+        padding: 12px;
+        border-radius: 8px;
+        font-weight: 500;
+        display: none;
+      }
+
+      .status.success {
+        background: #d1fae5;
+        color: #065f46;
+        border: 1px solid #10b981;
+      }
+
+      .status.error {
+        background: #fee2e2;
+        color: #991b1b;
+        border: 1px solid #ef4444;
+      }
+
+      .token-display {
+        font-family: 'Courier New', monospace;
+        font-size: 0.9rem;
+        word-break: break-all;
+      }
+
+      .copy-button {
+        font-size: 0.85rem;
+        padding: 6px 12px;
+        margin-left: 8px;
+      }
+
+      .steps {
+        margin-top: 24px;
+        background: #f8fafc;
+        padding: 20px;
+        border-radius: 8px;
+        border: 1px solid #e2e8f0;
+      }
+
+      .steps h3 {
+        margin-top: 0;
+        font-size: 1.1rem;
+      }
+
+      .steps ol {
+        margin: 12px 0;
+        padding-left: 20px;
+      }
+
+      .steps li {
+        margin-bottom: 8px;
+        color: #475569;
+      }
+
+      .steps code {
+        background: #e2e8f0;
+        padding: 2px 6px;
+        border-radius: 4px;
+        font-family: 'Courier New', monospace;
+        font-size: 0.9rem;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <h1>🔗 CodinGame Sync Bridge</h1>
+      <p>Configure the connection between Chrome and VS Code</p>
+
+      <section class="grid">
+        <div class="row">
+          <label for="ws-port">Bridge Port</label>
+          <input id="ws-port" type="number" value="45123" readonly />
+          <span class="hint">WebSocket port used by the VS Code extension (default: 45123)</span>
+        </div>
+
+        <div class="row">
+          <label for="auth-token">Authentication Token</label>
+          <input
+            id="auth-token"
+            type="text"
+            placeholder="Paste token from VS Code Output panel..."
+            autocomplete="off"
+            spellcheck="false"
+          />
+          <span class="hint">Copy this token from VS Code's "CodinGame" output channel</span>
+        </div>
+      </section>
+
+      <div class="actions">
+        <button id="save-btn" class="primary">Save Settings</button>
+        <button id="test-btn" class="secondary">Test Connection</button>
+        <button id="clear-btn" class="secondary">Clear Token</button>
+      </div>
+
+      <div id="status" class="status"></div>
+
+      <div class="info">
+        <strong>ℹ️ How to get your authentication token:</strong>
+        <div class="steps">
+          <h3 style="margin-top: 12px;">✨ Easy Method (Recommended):</h3>
+          <ol>
+            <li>Open <strong>VS Code</strong> with the CodinGame extension installed</li>
+            <li>Click the <strong>CodinGame icon</strong> (graph) in the Activity Bar (left sidebar)</li>
+            <li>Find the <strong>"Bridge Status"</strong> panel at the top</li>
+            <li>In the <strong>"🔑 Authentication Token"</strong> section, click the <strong>"📋 Copy Full Token"</strong> button</li>
+            <li>Paste the token in the field above</li>
+            <li>Click "Save Settings" to connect</li>
+          </ol>
+
+          <h3 style="margin-top: 16px; border-top: 1px solid #cbd5e1; padding-top: 12px;">📝 Alternative Method (Output Panel):</h3>
+          <ol>
+            <li>Open VS Code's <strong>Output</strong> panel (View → Output)</li>
+            <li>Select <strong>"CodinGame Bridge"</strong> from the dropdown</li>
+            <li>Look for the line: <code>[BRIDGE] Auth token: [64-character hex string]</code></li>
+            <li>Manually copy the full 64-character token</li>
+            <li>Paste it above and click "Save Settings"</li>
+          </ol>
+
+          <p style="margin: 12px 0 0 0; padding: 8px; background: #fef3c7; border-radius: 4px; font-size: 12px; color: #92400e;">
+            <strong>💡 Tip:</strong> The Copy Token button in VS Code is the fastest and most reliable way to get your token!
+          </p>
+        </div>
+      </div>
+
+      <div class="warning">
+        <strong>⚠️ Security Note:</strong>
+        This token is used to authenticate the Chrome extension with your local VS Code instance.
+        Keep it private and do not share it. The connection only works on your local machine (127.0.0.1).
+      </div>
+    </div>
+
+    <script src="options.js"></script>
+  </body>
+</html>
