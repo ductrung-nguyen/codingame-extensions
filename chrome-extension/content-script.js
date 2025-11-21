@@ -1719,6 +1719,47 @@
     captureStatusText.style.color = colors[type] || colors.info;
   }
 
+  function isBattlesPanelOpen() {
+    // Check if the "Last Battles" panel/modal is currently open
+    // Look for common patterns in the CodinGame UI
+
+    // Check for "Last battles" heading
+    const headings = document.querySelectorAll("h3");
+    const hasLastBattlesHeading = Array.from(headings).some(
+      (h) =>
+        h.textContent.includes("Last battles") ||
+        h.textContent.includes("last battles"),
+    );
+
+    // Check for battle-related elements
+    const hasLastBattleElements =
+      document.querySelector('[class*="last-battle"]') !== null ||
+      document.querySelector('[class*="battles-panel"]') !== null;
+
+    // Check for visible modal/overlay
+    const modal = document.querySelector(".modal");
+    const overlay = document.querySelector('[class*="overlay"]');
+    const hasVisibleModal =
+      (modal && !modal.style.display?.includes("none")) ||
+      (overlay && !overlay.style.display?.includes("none"));
+
+    // Check if we can see battle SHOW/CLOSE buttons
+    const battleButtons = document.querySelectorAll("button");
+    const hasBattleButtons = Array.from(battleButtons).some((btn) => {
+      const text = btn.textContent.toUpperCase();
+      const isVisible =
+        !btn.style.display?.includes("none") && btn.offsetParent !== null;
+      return isVisible && (text.includes("SHOW") || text.includes("CLOSE"));
+    });
+
+    return (
+      hasLastBattlesHeading ||
+      hasLastBattleElements ||
+      hasVisibleModal ||
+      hasBattleButtons
+    );
+  }
+
   async function captureBattlesAutomatically(startMonitoring = true) {
     console.log(
       "[CodinGame Content Script] Starting automatic battle capture...",
@@ -1953,8 +1994,34 @@
         captureShouldStop ? "warning" : successCount > 0 ? "success" : "error",
       );
 
+      // Only start/continue monitoring if battles panel is still open
       if (startMonitoring && !continuousMonitoring) {
-        startContinuousMonitoring();
+        if (isBattlesPanelOpen()) {
+          console.log(
+            "[CodinGame Content Script] All battles captured, starting monitoring (panel is open)",
+          );
+          startContinuousMonitoring();
+        } else {
+          console.log(
+            "[CodinGame Content Script] All battles captured but panel is closed, stopping monitoring",
+          );
+          updateBatchCaptureButton("📊 Capture", false);
+          updateCaptureStatus(
+            "✓ All battles captured (panel closed, monitoring stopped)",
+            "success",
+          );
+        }
+      } else if (continuousMonitoring && !isBattlesPanelOpen()) {
+        // If we're monitoring but panel was closed, stop monitoring
+        console.log(
+          "[CodinGame Content Script] Panel closed during monitoring, stopping",
+        );
+        stopContinuousMonitoring();
+        updateBatchCaptureButton("📊 Capture", false);
+        updateCaptureStatus(
+          "✓ All battles captured (panel closed, monitoring stopped)",
+          "success",
+        );
       } else {
         updateBatchCaptureButton(
           continuousMonitoring
@@ -2000,6 +2067,17 @@
 
     // Check for new battles every 10 seconds
     monitoringInterval = setInterval(async () => {
+      // First check if panel is still open
+      if (!isBattlesPanelOpen()) {
+        console.log(
+          "[CodinGame Content Script] Panel closed during monitoring, stopping automatically",
+        );
+        stopContinuousMonitoring();
+        updateBatchCaptureButton("📊 Capture", false);
+        updateCaptureStatus("Panel closed - monitoring stopped", "info");
+        return;
+      }
+
       if (!captureInProgress) {
         console.log("[CodinGame Content Script] Checking for new battles...");
         await captureBattlesAutomatically(false);
